@@ -2577,7 +2577,6 @@ document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest
 document.querySelectorAll('.snd').forEach(b=>b.onclick=()=>{const m=AU.cycle();sndUI();toast(['Music and effects on','Effects only','Sound off'][m]);});
 window.addEventListener('pagehide',()=>{if(G&&!B)save();});
 initTitle();
-window.__dbg={CM,UI,get G(){return G;}}; // TEMP-DEBUG
 })();
 </script>
 <script>if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
