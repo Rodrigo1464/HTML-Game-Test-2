@@ -2182,7 +2182,7 @@ function cmField(){
   m.fillStyle='#000';m.beginPath();for(const l of LAND)addPath(m,l.xy,CELL);m.fill();
   const px=m.getImageData(0,0,GW,GH).data,n=GW*GH,land=new Uint8Array(n),sea=new Uint8Array(n);
   for(let i=0;i<n;i++){const L=px[i*4+3]>100;land[i]=L?1:0;sea[i]=L?0:1;}
-  const dS=chamfer(sea),dL=chamfer(land);CM.sd=new Float32Array(n);
+  CM.land=land;const dS=chamfer(sea),dL=chamfer(land);CM.sd=new Float32Array(n);
   for(let i=0;i<n;i++)CM.sd[i]=land[i]?(Math.min(dS[i],60)-.5)*CELL:-(Math.min(dL[i],60)-.5)*CELL; // + inland, − offshore
   const R=mulberry32(5);
   CM.mt=MOUNTS.map(([lo,la,s,snow])=>{const [x,y]=P(lo,la),sg=s*2.4;return{x:x+(R()-.5)*8,z:y+(R()-.5)*8,a:s*(snow?2.4:1.3),s2:2*sg*sg,r2:9*sg*sg};});
@@ -2246,39 +2246,105 @@ function cmTerrain(scene){
   const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(pos,3));g.setAttribute('color',new T.BufferAttribute(col,3));g.setAttribute('uv',new T.BufferAttribute(uv,2));
   g.computeVertexNormals();g.computeBoundingSphere();
   scene.add(new T.Mesh(g,new T.MeshLambertMaterial({vertexColors:true})));
-  // the same facets again, washed with each realm's colour (and a darker line on the borders)
-  CM.terrCv=document.createElement('canvas');CM.terrCv.width=GW*2;CM.terrCv.height=GH*2;
-  CM.terrTex=new T.CanvasTexture(CM.terrCv);CM.terrTex.colorSpace=T.SRGBColorSpace;CM.terrTex.anisotropy=4;
-  const ov=new T.Mesh(g,new T.MeshLambertMaterial({map:CM.terrTex,transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
-  ov.renderOrder=1;scene.add(ov);
+  // the same facets again, washed with each realm's colour: strong from afar, faint up close, and only above the waterline so the coast stays clean
+  const TW=GW*CMK,TH=GH*CMK;
+  CM.terrTex=new T.DataTexture(new Uint8Array(TW*TH*4),TW,TH);CM.terrTex.colorSpace=T.SRGBColorSpace;CM.terrTex.anisotropy=4;
+  CM.terrTex.magFilter=T.LinearFilter;CM.terrTex.minFilter=T.LinearMipmapLinearFilter;CM.terrTex.generateMipmaps=true;
+  const om=CM.ovMat=new T.MeshLambertMaterial({map:CM.terrTex,transparent:true,opacity:.5,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+  om.onBeforeCompile=sh=>{
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vWY;').replace('#include <begin_vertex>','#include <begin_vertex>\nvWY=position.y;');
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vWY;').replace('#include <map_fragment>','#include <map_fragment>\ndiffuseColor.a*=smoothstep(.05,.55,vWY);');};
+  const ov=new T.Mesh(g,om);ov.renderOrder=1;scene.add(ov);
   const edge=new T.Color();cmColor(-3.6,1,0,0,.5,edge); // the sea floor continues past the edge of the map
   const far=new T.Mesh(new T.PlaneGeometry(MW*8,MH*8).rotateX(-Math.PI/2).translate(MW/2,-3.6,MH/2),new T.MeshLambertMaterial({color:edge}));scene.add(far);
 }
-function cmRegionsFine(){ // the city-region grid again at twice the resolution, with smooth outlines
-  const TW=GW*2,TH=GH*2,rid=CM.rid=new Int16Array(TW*TH),ids=[-1,-1,-1,-1],ws=[0,0,0,0];
-  for(let y=0;y<TH;y++)for(let x=0;x<TW;x++){
-    const cx=(x+.5)/2-.5,cy=(y+.5)/2-.5,i0=Math.floor(cx),j0=Math.floor(cy),u=cx-i0,v=cy-j0;let n=0;
-    for(let k=0;k<4;k++){const gx=i0+(k&1),gy=j0+(k>>1),w=((k&1)?u:1-u)*((k>>1)?v:1-v),id=gx<0||gy<0||gx>=GW||gy>=GH?-1:regionGrid[gy*GW+gx];
-      let f=-1;for(let q=0;q<n;q++)if(ids[q]===id){f=q;break;}
-      if(f<0){ids[n]=id;ws[n]=w;n++;}else ws[f]+=w;}
-    let b=0;for(let q=1;q<n;q++)if(ws[q]>ws[b])b=q;rid[y*TW+x]=ids[b];}
+const CMK=4; // fine territory pixels per region-grid cell, one world unit each
+function cmRegionsFine(){ // the region grid at CMK× resolution: each fine pixel takes the label with the biggest Gaussian-weighted vote of the cells around it, so the grid's staircase outlines become smooth curves
+  const k=CMK,TW=GW*k,TH=GH*k,lab=CM.rid=new Int16Array(TW*TH),C=new Int16Array(GW*GH);
+  for(let i=0;i<GW*GH;i++)C[i]=regionGrid[i]>=0?regionGrid[i]:CM.land[i]?-2:-1; // a city's region, land nobody owns, or sea
+  const at=(x,y)=>x<0||y<0||x>=GW||y>=GH?-1:C[y*GW+x],wt=[],ids=new Int16Array(25),ws=new Float32Array(25);
+  for(let s=0;s<k;s++){const o=(s+.5)/k-.5;wt.push([-2,-1,0,1,2].map(d=>Math.exp(-((d-o)**2)/1.62)));}
+  for(let gy=0;gy<GH;gy++)for(let gx=0;gx<GW;gx++){
+    const c=C[gy*GW+gx];let uni=true;
+    for(let dy=-2;dy<=2&&uni;dy++)for(let dx=-2;dx<=2;dx++)if(at(gx+dx,gy+dy)!==c){uni=false;break;}
+    for(let sy=0;sy<k;sy++)for(let sx=0;sx<k;sx++){
+      const o=(gy*k+sy)*TW+gx*k+sx;if(uni){lab[o]=c;continue;}
+      const wx=wt[sx],wy=wt[sy];let n=0;
+      for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const id=at(gx+dx,gy+dy),w=wx[dx+2]*wy[dy+2];let f=0;while(f<n&&ids[f]!==id)f++;if(f===n){ids[n]=id;ws[n]=w;n++;}else ws[f]+=w;}
+      let b=0;for(let q=1;q<n;q++)if(ws[q]>ws[b])b=q;lab[o]=ids[b];}
+  }
+  const fill=CM.fillLab=Int16Array.from(lab); // the tint spills a few units out to sea so it always reaches the terrain's own coastline, where the shader trims it
+  for(let pass=0;pass<8;pass++){const src=Int16Array.from(fill);
+    for(let y=0;y<TH;y++)for(let x=0;x<TW;x++){const i=y*TW+x;if(src[i]!==-1)continue;
+      const v=x>0&&src[i-1]>=0?src[i-1]:x<TW-1&&src[i+1]>=0?src[i+1]:y>0&&src[i-TW]>=0?src[i-TW]:y<TH-1&&src[i+TW]>=0?src[i+TW]:-1;if(v>=0)fill[i]=v;}}
 }
-function cmTerrTex(){ // paint who owns what: a wash of each realm's colour, with a thin darker line along the borders
-  if(!CM.terrCv)return;if(!CM.rid)cmRegionsFine();
-  const TW=CM.terrCv.width,TH=CM.terrCv.height,ctx=CM.terrCv.getContext('2d'),img=ctx.createImageData(TW,TH),d=img.data,rid=CM.rid;
-  const own=NODES.map(n=>G.s[n.id].owner),rgb={};for(const f in FACTIONS)rgb[f]=hexRgb(FACTIONS[f].color);
-  for(let y=0;y<TH;y++)for(let x=0;x<TW;x++){
-    const i=y*TW+x,r=rid[i];if(r<0)continue;
-    const o=own[r];let [R,Gc,B]=rgb[o],a=150,bd=0;
-    const rr=x+1<TW?rid[i+1]:r,rd=y+1<TH?rid[i+TW]:r;
-    if(rr>=0&&rr!==r)bd=own[rr]!==o?2:1;
-    if(rd>=0&&rd!==r)bd=Math.max(bd,own[rd]!==o?2:1);
-    if(bd===2){R*=.4;Gc*=.4;B*=.4;a=235;}else if(bd===1){R*=.7;Gc*=.7;B*=.7;a=185;}
-    const p=i*4;d[p]=R;d[p+1]=Gc;d[p+2]=B;d[p+3]=a;}
-  for(let y=0;y<TH;y++)for(let x=0;x<TW;x++){ // give the see-through rim the colour of its neighbour so the coast doesn't fringe dark
-    const p=(y*TW+x)*4;if(d[p+3])continue;
-    for(const q of [p-4,p+4,p-TW*4,p+TW*4])if(q>=0&&q<d.length&&d[q+3]){d[p]=d[q];d[p+1]=d[q+1];d[p+2]=d[q+2];break;}}
-  ctx.putImageData(img,0,0);CM.terrTex.needsUpdate=true;
+function cmTerrTex(){ // paint who owns what into the tint texture, and recolour the border lines
+  if(!CM.terrTex)return;if(!CM.rid)cmRegionsFine();
+  const TW=GW*CMK,TH=GH*CMK,d=CM.terrTex.image.data,fl=CM.fillLab,rgb=NODES.map(n=>hexRgb(FACTIONS[G.s[n.id].owner].color));
+  for(let y=0;y<TH;y++){const row=(TH-1-y)*TW; // texture rows run bottom-up
+    for(let x=0;x<TW;x++){const r=fl[y*TW+x],p=(row+x)*4;if(r<0){d[p+3]=0;continue;}const c=rgb[r];d[p]=c[0];d[p+1]=c[1];d[p+2]=c[2];d[p+3]=255;}}
+  CM.terrTex.needsUpdate=true;cmBorderPaint();
+}
+function cmBorders(scene){ // border lines traced from the fine region map, smoothed, and draped over the hills as two-tone ribbons
+  const TW=GW*CMK,TH=GH*CMK,lab=CM.rid,VW=TW+1,s=CELL/CMK,s0=[],s1=[],sL=[],sR=[];
+  const add=(v0,v1,l,r)=>{if(l===-1||r===-1)return;s0.push(v0);s1.push(v1);sL.push(l);sR.push(r);}; // a unit edge between two pixels; sL lies on the side of (dz,-dx) going v0→v1
+  for(let y=0;y<TH;y++)for(let x=0;x<TW;x++){const a=lab[y*TW+x];
+    if(x+1<TW){const b=lab[y*TW+x+1];if(a!==b)add(y*VW+x+1,(y+1)*VW+x+1,b,a);}
+    if(y+1<TH){const b=lab[(y+1)*TW+x];if(a!==b)add((y+1)*VW+x,(y+1)*VW+x+1,a,b);}}
+  const adj=new Map();for(let i=0;i<s0.length;i++)for(const v of [s0[i],s1[i]]){const a=adj.get(v);if(a)a.push(i);else adj.set(v,[i]);}
+  const pair=i=>{const a=sL[i]+2,b=sR[i]+2;return a<b?a*999+b:b*999+a;},thru=v=>{const a=adj.get(v);return a.length===2&&pair(a[0])===pair(a[1]);};
+  const used=new Uint8Array(s0.length),chains=[];
+  const walk=(v,i)=>{ // follow one border from v until it meets another, reaches the sea, or comes back round
+    const L=s0[i]===v?sL[i]:sR[i],R=s0[i]===v?sR[i]:sL[i],pts=[v];let cur=v;
+    for(;;){used[i]=1;cur=s0[i]===cur?s1[i]:s0[i];pts.push(cur);if(cur===v||!thru(cur))break;const a=adj.get(cur),j=a[0]===i?a[1]:a[0];if(used[j])break;i=j;}
+    chains.push({pts,L,R,closed:cur===v&&thru(v),runs:[]});};
+  for(const [v,a] of adj)if(!thru(v))for(const i of a)if(!used[i])walk(v,i);
+  for(let i=0;i<s0.length;i++)if(!used[i])walk(s0[i],i);
+  const P_=[],N_=[],IDX=[];let nv=0;
+  const emit=(run,ch)=>{const v0=nv; // four vertices per point: outer and inner edge of the left strip, inner and outer edge of the right
+    for(let i=0;i<run.length;i++){const a=run[Math.max(0,i-1)],b=run[Math.min(run.length-1,i+1)],[x,z]=run[i];let tx=b[0]-a[0],tz=b[1]-a[1];const l=Math.hypot(tx,tz)||1;tx/=l;tz/=l;
+      const y=hm(x,z);for(let q=0;q<4;q++){P_.push(x,y,z);N_.push(tz,-tx);}nv+=4;
+      if(i){const o=nv-8,p=nv-4;IDX.push(o,o+1,p+1,o,p+1,p,o+2,o+3,p+3,o+2,p+3,p+2);}}
+    ch.runs.push([v0,nv]);};
+  const land=p=>hm(p[0],p[1])>=.12,cross=(a,b)=>{let lo=a,hi=b;for(let k=0;k<8;k++){const m=[(lo[0]+hi[0])/2,(lo[1]+hi[1])/2];if(land(m))lo=m;else hi=m;}return lo;};
+  const ext=(A,B)=>{const dx=A[0]-B[0],dz=A[1]-B[1],l=Math.hypot(dx,dz)||1,out=[]; // carry a border that stops at the grid's coast on to the terrain's real waterline
+    for(let t=1;t<=10;t++){const p=[A[0]+dx/l*t,A[1]+dz/l*t];out.push(p);if(!land(p))break;}return out;};
+  for(const ch of chains){
+    let P=ch.pts.map(v=>[(v%VW)*s,Math.floor(v/VW)*s]);const cl=ch.closed;if(cl)P.pop();const n=P.length;
+    for(let it=0;it<4;it++){const Q=P.map(p=>p.slice()); // ends stay put so borders still meet at the junctions
+      for(let i=cl?0:1;i<(cl?n:n-1);i++){let x=0,z=0;for(let j=-3;j<=3;j++){const q=P[cl?(i+j+n)%n:clamp(i+j,0,n-1)];x+=q[0];z+=q[1];}Q[i]=[x/7,z/7];}P=Q;}
+    if(cl)P.push(P[0].slice());
+    let R=[P[0]],acc=0;for(let i=1;i<P.length;i++){acc+=Math.hypot(P[i][0]-P[i-1][0],P[i][1]-P[i-1][1]);if(acc>=1.5||i===P.length-1){R.push(P[i]);acc=0;}}
+    if(!cl&&R.length>1){
+      if(adj.get(ch.pts[0]).length===1)R=[...ext(R[0],R[Math.min(3,R.length-1)]).reverse(),...R];
+      if(adj.get(ch.pts[ch.pts.length-1]).length===1)R=[...R,...ext(R[R.length-1],R[Math.max(0,R.length-4)])];}
+    let run=[];
+    for(let i=0;i<R.length;i++){const p=R[i];
+      if(land(p)){if(!run.length&&i>0)run.push(cross(p,R[i-1]));run.push(p);}
+      else if(run.length){run.push(cross(R[i-1],p));if(run.length>1)emit(run,ch);run=[];}}
+    if(run.length>1)emit(run,ch);
+  }
+  const T=THREE,g=new T.BufferGeometry();
+  g.setAttribute('position',new T.Float32BufferAttribute(P_,3));g.setAttribute('aSide',new T.BufferAttribute(new Float32Array(nv*3),3));
+  g.setAttribute('color',new T.BufferAttribute(new Float32Array(nv*4),4));g.setIndex(IDX);g.computeBoundingSphere();
+  CM.bdW={value:1};CM.bdL={value:.3};
+  const m=new T.MeshBasicMaterial({vertexColors:true,transparent:true,depthWrite:false,side:T.DoubleSide,polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4});
+  m.onBeforeCompile=sh=>{sh.uniforms.uW=CM.bdW;sh.uniforms.uLift=CM.bdL; // the strips widen as the camera pulls back so the lines keep about the same width on screen
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec3 aSide;uniform float uW;uniform float uLift;').replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed+=aSide*uW;transformed.y+=uLift;');};
+  const mesh=new T.Mesh(g,m);mesh.renderOrder=1.5;mesh.frustumCulled=false;scene.add(mesh);
+  CM.bd={chains:chains.filter(c=>c.runs.length),nrm:new Float32Array(N_),g};
+}
+function cmBorderPaint(){ // between two realms each side of the line carries its own realm's colour; inside one realm a thin darker line marks the provinces
+  const bd=CM.bd;if(!bd||!G)return;
+  const g=bd.g,S=g.attributes.aSide.array,Cl=g.attributes.color.array,N=bd.nrm,c=new THREE.Color(),own=NODES.map(n=>G.s[n.id].owner),cL=[0,0,0,0],cR=[0,0,0,0];
+  const tone=(o,k,a,out)=>{if(!o){out[3]=0;return;}c.set(FACTIONS[o].color).multiplyScalar(k);out[0]=c.r;out[1]=c.g;out[2]=c.b;out[3]=a;};
+  for(const ch of bd.chains){
+    const oL=ch.L>=0?own[ch.L]:null,oR=ch.R>=0?own[ch.R]:null,prov=!!oL&&oL===oR,fL=prov?.32:oL?1:0,fR=prov?.32:oR?1:0;
+    if(prov){tone(oL,.45,.6,cL);tone(oL,.45,.6,cR);}else{tone(oL,.85,.95,cL);tone(oR,.85,.95,cR);}
+    for(const [a,b] of ch.runs)for(let v=a;v<b;v+=4){const nx=N[v*2],nz=N[v*2+1];
+      S[v*3]=nx*fL;S[v*3+2]=nz*fL;S[v*3+9]=-nx*fR;S[v*3+11]=-nz*fR;
+      Cl.set(cL,v*4);Cl.set(cL,v*4+4);Cl.set(cR,v*4+8);Cl.set(cR,v*4+12);}}
+  g.attributes.aSide.needsUpdate=g.attributes.color.needsUpdate=true;
 }
 function cmWaterBuild(scene){
   const T=THREE,g0=new T.PlaneGeometry(MW+700,MH+700,48,54);g0.rotateX(-Math.PI/2);g0.translate(MW/2,0,MH/2);
@@ -2510,6 +2576,8 @@ function cmCamUpdate(dt){
   c.lookAt(cv.tx,ty,cv.tz);
   CM.scene.fog.near=cv.d*1.6;CM.scene.fog.far=cv.d*4+1000;
   CM.sc=clamp(cv.d/430,.85,2.6);
+  CM.ovMat.opacity=lerp(.2,.55,sstep(110,650,cv.d)); // realm colours are strong from afar and fade up close, leaving the land and the border lines
+  const wpp=2*cv.d*Math.tan(c.fov*Math.PI/360)/(CM.H||600);CM.bdW.value=Math.max(.65,2.9*wpp);CM.bdL.value=.25+CM.bdW.value*.5;
 }
 function cmPan(dx,dy){
   const wpp=2*cv.d*Math.tan(CM.cam.fov*Math.PI/360)/(CM.H||600),kf=wpp/Math.max(.4,Math.sin(cmPitch(cv.d)));
@@ -2603,7 +2671,7 @@ function cmInit(){
   sc.add(new T.HemisphereLight(0xeaf3ff,0x7a6a48,1.5));
   const sun=new T.DirectionalLight(0xfff1d6,2.5);sun.position.set(-500,700,-300);sc.add(sun);
   CM.mat=new T.MeshLambertMaterial({vertexColors:true});CM.boat=cmBoatGeo();
-  cmTerrain(sc);cmWaterBuild(sc);cmTrees(sc,cmRoads(sc));cmShips(sc);
+  cmTerrain(sc);cmRegionsFine();cmBorders(sc);cmWaterBuild(sc);cmTrees(sc,cmRoads(sc));cmShips(sc);
   const rg=new T.RingGeometry(.88,1,48);rg.rotateX(-Math.PI/2);
   const rm=col=>new T.MeshBasicMaterial({color:col,transparent:true,depthTest:false,side:T.DoubleSide});
   CM.ringSel=rm(0xf4cd5c);CM.ringGo=rm(0xf0c75a);CM.ringFoe=rm(0xe2553f);
