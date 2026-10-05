@@ -1429,11 +1429,12 @@ function fireTarget(u){
 
 /* ================= BATTLE: MOVEMENT ================= */
 function turnTo(u,a,dt,rate){const d=angDiff(u.face,a),m=rate*dt;u.face+=Math.abs(d)<=m?d:Math.sign(d)*m;return Math.abs(angDiff(u.face,a));}
-function stepToward(u,tx,tz,sp,dt){ // true once arrived
+function stepToward(u,tx,tz,sp,dt,face){ // true once arrived; given a facing, the unit backs off or sidesteps while holding it
   const wp=wallWaypoint(u,tx,tz);if(wp){tx=wp[0];tz=wp[1];}
   const dx=tx-u.x,dz=tz-u.z,d=Math.hypot(dx,dz);if(d<.4){u.spd=0;return !wp;}
   let k=1;
-  if(d>8){const off=turnTo(u,Math.atan2(dx,dz),dt,turnRate(u));k=off>1.2?.15:Math.cos(off*.8);} // wheel before marching off
+  if(face!=null&&!wp)turnTo(u,face,dt,turnRate(u));
+  else if(d>8){const off=turnTo(u,Math.atan2(dx,dz),dt,turnRate(u));k=off>1.2?.15:Math.cos(off*.8);} // wheel before marching off
   let s=Math.min(d,sp*k*terrMul(u,u.x,u.z)*dt);
   if(s>1e-4){const sl=(heightAt(u.x+dx/d*s,u.z+dz/d*s)-heightAt(u.x,u.z))/s;s*=clamp(1-sl*.5,.6,1.15);}
   u.x+=dx/d*s;u.z+=dz/d*s;u.spd=s/dt;return false;
@@ -1460,7 +1461,7 @@ function updUnit(u,dt){
     if(!prim)prim=u.contacts.slice().sort((a,b)=>(a.state==='rout')-(b.state==='rout')||flankAng(u,a)-flankAng(u,b))[0];
     u.prim=prim;u.disen=false;
     if(u.order==='move'&&u.dest){const dx=u.dest.x-u.x,dz=u.dest.z-u.z; // pulling out of melee costs men
-      if(u.contacts.every(e=>(e.x-u.x)*dx+(e.z-u.z)*dz<0)){u.disen=true;stepToward(u,u.dest.x,u.dest.z,walkSp(u)*.5,dt);}}
+      if(u.contacts.every(e=>(e.x-u.x)*dx+(e.z-u.z)*dz<0)){u.disen=true;stepToward(u,u.dest.x,u.dest.z,walkSp(u)*.5,dt,u.face);}} // back out still facing them
     if(!u.disen){
       turnTo(u,Math.atan2(prim.x-u.x,prim.z-u.z),dt,.5);
       if(segSeg(u.sg,prim.sg)[0]-u.dm.hd-prim.dm.hd>.4){const [fx,fz]=fwdV(u.face);u.x+=fx*1.5*dt;u.z+=fz*1.5*dt;}
@@ -1490,7 +1491,7 @@ function updUnit(u,dt){
     }
   }
   u.running=false;u.runD=0;
-  if(u.order==='move'&&u.dest){if(!stepToward(u,u.dest.x,u.dest.z,walkSp(u),dt))return;u.order='none';}
+  if(u.order==='move'&&u.dest){const bk=u.dest.back;if(!stepToward(u,u.dest.x,u.dest.z,walkSp(u)*(bk||1),dt,bk?u.dest.face:null))return;u.order='none';}
   u.spd=0;
   const t=u.T.rng&&u.ammo>0?fireTarget(u):null; // fire at will
   if(t&&Math.abs(angDiff(u.face,Math.atan2(t.x-u.x,t.z-u.z)))<1.2){if(turnTo(u,Math.atan2(t.x-u.x,t.z-u.z),dt,1)<.5)tryFire(u,t);}
@@ -1613,17 +1614,25 @@ function autoDeploy(s){
 
 /* ================= BATTLE: ORDERS ================= */
 const selUnits=()=>[...B.sel].map(unitById).filter(u=>u&&active(u));
-function orderMove(sel,pt){ // the group keeps its shape and turns to face the march
+function threatFace(x,z,side,fb){ // the way to face from (x,z): toward the enemy army, nearer units weighing more
+  let sx=0,sz=0;
+  for(const e of B.units){if(e.side===side||!onField(e)||e.state==='rout')continue;
+    const dx=e.x-x,dz=e.z-z,d=Math.hypot(dx,dz)||1,w=e.men/Math.max(d,20)**1.5/d;sx+=dx*w;sz+=dz*w;}
+  return sx||sz?Math.atan2(sx,sz):fb;
+}
+function orderMove(sel,pt){ // the group keeps its shape and ends up facing the enemy
   AU.ui('move');
   const c=centroid(sel),phi=Math.atan2(sel.reduce((a,u)=>a+Math.sin(u.face),0),sel.reduce((a,u)=>a+Math.cos(u.face),0));
-  const dx=pt.x-c.x,dz=pt.z-c.z,th=Math.hypot(dx,dz)>4?Math.atan2(dx,dz):phi;
+  const dx=pt.x-c.x,dz=pt.z-c.z,th=threatFace(pt.x,pt.z,0,Math.hypot(dx,dz)>4?Math.atan2(dx,dz):phi);
   const [l0x,l0z]=latV(phi),[f0x,f0z]=fwdV(phi),[l1x,l1z]=latV(th),[f1x,f1z]=fwdV(th);
   for(const u of sel){const ox=u.x-c.x,oz=u.z-c.z,lx=ox*l0x+oz*l0z,lz=ox*f0x+oz*f0z;
     u.order='move';u.target=null;u.orderT=B.time;u.skirmT=0;
-    u.dest=openDest({x:clamp(pt.x+l1x*lx+f1x*lz,-FX+6,FX-6),z:clamp(pt.z+l1z*lx+f1z*lz,-FZ+4,FZ-4),face:th});}
+    const d=u.dest=openDest({x:clamp(pt.x+l1x*lx+f1x*lz,-FX+6,FX-6),z:clamp(pt.z+l1z*lx+f1z*lz,-FZ+4,FZ-4),face:th});
+    const off=Math.abs(angDiff(th,Math.atan2(d.x-u.x,d.z-u.z)));
+    if(Math.hypot(d.x-u.x,d.z-u.z)<35&&off>1.1)d.back=off>2?.55:.75;} // a short step back or aside: don't turn their backs to do it
 }
 function orderAttack(sel,e){AU.ui('attack');for(const u of sel){u.order='attack';u.target=e;u.dest=null;u.orderT=B.time;u.skirmT=0;}}
-function orderHalt(sel){for(const u of sel){u.order='none';u.target=null;u.dest={x:u.x,z:u.z,face:u.face};u.orderT=B.time;}}
+function orderHalt(sel){for(const u of sel){u.order='none';u.target=null;u.dest={x:u.x,z:u.z,face:threatFace(u.x,u.z,u.side,u.face)};u.orderT=B.time;}} // stop and turn to face them
 function deployMove(sel,pt){
   AU.ui('move');
   const Z=zoneOf(0),c=centroid(sel),inZ=u=>{u.x=clamp(u.x,Z.x0,Z.x1);u.z=clamp(u.z,Z.z0+u.dm.hd,Z.z1-u.dm.hd);};
