@@ -1139,10 +1139,16 @@ function loadThree(){
 
 /* ================= BATTLE: FIELD & RULES ================= */
 const FX=120,FZ=130,WALL_Z=78,TOWN_Z=101,BATTLE_TIME=480,SIM_DT=.05,MELEE_K=.1,CONTACT=1.2;
-const LAYOUT={
-  inf:{files:10,sx:1.5,sz:1.6,per:4},spear:{files:10,sx:1.5,sz:1.6,per:4},missile:{files:10,sx:2.1,sz:2.1,per:4},
-  cav:{files:8,sx:2.4,sz:3.6,per:4},gen:{files:4,sx:2.6,sz:3.6,per:4},eleph:{files:4,sx:6,sz:7,per:3}
+const LAYOUTS={ // men per figure drawn; denser ranks keep each unit's footprint about the same, so the fighting is unchanged
+  normal:{inf:{files:10,sx:1.5,sz:1.6,per:4},spear:{files:10,sx:1.5,sz:1.6,per:4},missile:{files:10,sx:2.1,sz:2.1,per:4},
+    cav:{files:8,sx:2.4,sz:3.6,per:4},gen:{files:4,sx:2.6,sz:3.6,per:4},eleph:{files:4,sx:6,sz:7,per:3}},
+  large:{inf:{files:14,sx:1.1,sz:1.2,per:2},spear:{files:14,sx:1.1,sz:1.2,per:2},missile:{files:14,sx:1.5,sz:1.5,per:2},
+    cav:{files:10,sx:1.9,sz:2.9,per:2},gen:{files:5,sx:2.1,sz:3,per:2},eleph:{files:3,sx:6.5,sz:6.5,per:2}},
+  huge:{inf:{files:20,sx:.8,sz:1,per:1},spear:{files:20,sx:.8,sz:1,per:1},missile:{files:20,sx:1.05,sz:1.2,per:1},
+    cav:{files:15,sx:1.3,sz:2.5,per:1},gen:{files:8,sx:1.4,sz:2.6,per:1},eleph:{files:4,sx:6,sz:6.5,per:1.5}}
 };
+const SIZES=['normal','large','huge'],SIZE_NAME={normal:'Normal',large:'Large',huge:'Huge'},SIZE_KEY='imperivm-unitsize';
+let unitSize='large';try{const v=localStorage.getItem(SIZE_KEY);if(SIZES.includes(v))unitSize=v;}catch(e){}
 const SHIELD={rome:'scutum',samnium:'scutum',etruria:'round',greeks:'round',carthage:'oval',gauls:'oval',rebels:'oval'};
 const HELM={rome:'crest',samnium:'plume',etruria:'corinth',greeks:'corinth',carthage:'cap',gauls:'hair',rebels:'cap'};
 const GATES=[-62,0,62],GATE_W=20;
@@ -1202,7 +1208,7 @@ function wallWaypoint(u,tx,tz){ // armies cross the walls only through the gates
 
 /* ================= BATTLE: UNITS ================= */
 function mkBU(cu,side,fid){
-  const T=UNITS[cu.type],L=LAYOUT[T.kind];
+  const T=UNITS[cu.type],L=LAYOUTS[unitSize][T.kind];
   const u={uid:cu.uid,cu,side,fid,T,kind:T.kind,L,men:cu.men,max:T.men,mor:T.mor+(cu.xp||0)*4,xp:cu.xp||0,state:'ok',
     x:0,z:0,face:homeFace(side),order:'none',dest:null,target:null,orderT:-9,running:false,runD:0,spd:0,contacts:[],prim:null,disen:false,
     chargeT:{},ammo:T.ammo?T.ammo*2+2:0,reload:Math.random()*2,pend:0,fought:false,rallies:0,skirmT:0,home:null,figs:[],alive:[],sg:null};
@@ -1782,7 +1788,7 @@ function fxBlood(x,y,z,dx,dz,n){for(let i=0;i<n;i++){const s=rnd(1,3.2);fxAdd(R3
 function fxSparks(x,y,z,n){for(let i=0;i<n;i++)fxAdd(R3.bits,x,y,z,rnd(-4,4),rnd(1,4.5),rnd(-4,4),rnd(.16,.3),.14,.05,Math.random()<.5?0xfff0b8:0xffc861,1,9,1.5);}
 
 function spawnVolley(u,t,fl){
-  const n=Math.min(u.alive.length,24);t.cover=B.time+fl+.4; // the target raises its shields
+  const n=Math.min(u.alive.length,Math.round(24*Math.sqrt(4/u.L.per)));t.cover=B.time+fl+.4; // the target raises its shields
   for(let k=0;k<n;k++){let i=R3.projFree.pop();if(i===undefined){const o=B.shots[0];if(!o||B.time-o.t0<o.T)break;i=B.shots.shift().i;} // reuse the oldest spent arrow
     const f=u.alive[k],g=t.alive.length?t.alive[Math.floor(Math.random()*t.alive.length)]:t,gx=g.x+(Math.random()-.5)*2,gz=g.z+(Math.random()-.5)*2,st=Math.random()*.3;
     f.swk=u.wk;f.sw=-1;f.wait=st+1e-3; // each man draws or winds up after a ragged delay; the missile leaves his hand REL later
@@ -1806,7 +1812,7 @@ function updFigs(vdt){ // soldiers keep their place in the ranks, square off in 
   const t=R3.clk+=vdt,snap=vdt>=50;R3.uT.value=t;
   for(const u of B.units){
     const L=u.L,al=u.alive,n=al.length,d=u.dm,[lx,lz]=latV(u.face),[fx,fz]=fwdV(u.face),cav=isCav(u),bg=big(u);
-    const rt=u.state==='rout',spread=rt?2.4:1,jit=rt?6:1,fight=u.contacts.length>0&&!rt,maxS=(runSp(u)*1.5+3)*vdt;
+    const rt=u.state==='rout',spread=rt?2.4:1,jit=(rt?6:1)*Math.min(1,L.sx/1.5),fight=u.contacts.length>0&&!rt,maxS=(runSp(u)*1.5+3)*vdt;
     const reach=REACH(u),stride=u.kind==='eleph'?5:cav?3.4:1.7,gait=u.kind==='eleph'?15:cav?6:3.5,duel=fight?(u.kind==='spear'?2:1):0;
     const guard=fight?1:u.cover>B.time&&u.wk!=='bow'&&u.wk!=='sling'?2:0;
     for(let j=0;j<n;j++){const f=al[j],file=j%d.f,rank=Math.floor(j/d.f),rowN=rank===d.r-1?n-rank*d.f:d.f;
@@ -2668,7 +2674,9 @@ function factionsBody(){
 }
 async function openMenu(){
   if(UI.busy)return;
-  const v=await modal({title:'Imperivm',body:factionsBody(),buttons:[{label:'Resume',value:'r',cls:'primary'},{label:'Last dispatches',value:'d'},{label:'How to play',value:'h'},{label:'New campaign',value:'n'}]});
+  const v=await modal({title:'Imperivm',body:factionsBody(),buttons:[{label:'Resume',value:'r',cls:'primary'},{label:'Last dispatches',value:'d'},{label:'Unit size: '+SIZE_NAME[unitSize],value:'u'},{label:'How to play',value:'h'},{label:'New campaign',value:'n'}]});
+  if(v==='u'){unitSize=SIZES[(SIZES.indexOf(unitSize)+1)%SIZES.length];try{localStorage.setItem(SIZE_KEY,unitSize);}catch(e){}
+    toast('Unit size: '+SIZE_NAME[unitSize]+' — '+{normal:'one figure for every 4 men',large:'one figure for every 2 men',huge:'every man on the field'}[unitSize]);return openMenu();}
   if(v==='d')showReports(G.last||[],'Last dispatches');
   if(v==='h')modal({title:'How to play',body:HELP,buttons:[{label:'Got it',value:1,cls:'primary'}]});
   if(v==='n'){const ok=await modal({title:'Start over?',body:'<p>Your current campaign will be erased.</p>',buttons:[{label:'Start a new campaign',value:1,cls:'primary'},{label:'Cancel',value:0}]});if(ok)newCampaign(true);}
@@ -2729,7 +2737,7 @@ document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest
 document.querySelectorAll('.snd').forEach(b=>b.onclick=()=>{const m=AU.cycle();sndUI();toast(['Music and effects on','Effects only','Sound off'][m]);});
 window.addEventListener('pagehide',()=>{if(G&&!B)save();});
 // local dev only: launch a sample battle with testBattle() from the console
-if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))window.imp={get B(){return B;},cam,camT,R3,beginBattle,adv(s){const sp=B.speed;B.speed=1;for(let i=0;i<s/.05&&B&&R3.scene;i++){cancelAnimationFrame(R3.raf);R3.last=performance.now()-50;frame(performance.now());}if(B)B.speed=sp;}},window.testBattle=(p,e,eFid='gauls',walls=0)=>{
+if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))window.imp={get B(){return B;},cam,camT,R3,beginBattle,size(s){if(SIZES.includes(s))unitSize=s;return unitSize;},adv(s){const sp=B.speed;B.speed=1;for(let i=0;i<s/.05&&B&&R3.scene;i++){cancelAnimationFrame(R3.raf);R3.last=performance.now()-50;frame(performance.now());}if(B)B.speed=sp;}},window.testBattle=(p,e,eFid='gauls',walls=0)=>{
   let id=9e5;const mk=t=>({uid:id++,type:t,men:UNITS[t].men,xp:0});
   p=p||['general','rm_hastati','rm_principes','rm_triarii','rm_velites','rm_equites','rm_legion'];
   e=e||['ga_war','ga_war','ga_chosen','ga_spear','ga_skirm','ga_cav','ga_noble'];
