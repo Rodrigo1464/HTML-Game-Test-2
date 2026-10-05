@@ -218,9 +218,9 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .bvs{font-size:12px;color:var(--hud-dim)}
 #bField{flex:1 1 auto;min-height:0;position:relative;overflow:hidden;background:#aec6d4}
 #bGL{position:absolute;inset:0}
-#bGL canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
+#bGL canvas{display:block;width:100%;height:100%;touch-action:none;outline:none;-webkit-touch-callout:none}
 #bLabels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
-.blab{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;gap:2px;padding:2px;pointer-events:auto;cursor:pointer}
+.blab{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;gap:2px;padding:2px}
 .blab .usym{display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55))}
 .blab i{display:block;width:24px;height:3px;border-radius:2px;background:rgba(0,0,0,.55);overflow:hidden}
 .blab i b{display:block;height:100%;background:#7fd36e}
@@ -236,6 +236,7 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .b-speed button.on{background:#a8281d;color:#fff3dc}
 .b-cam{position:absolute;left:10px;bottom:10px;display:flex;gap:6px}
 .b-cam button{width:42px;height:42px;border-radius:12px;background:rgba(26,18,11,.86);color:var(--hud-ink);border:1px solid var(--hud-line);font-size:20px;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.b-desel{position:absolute;right:10px;bottom:10px;height:42px;padding:0 14px;border-radius:12px;background:rgba(26,18,11,.86);color:var(--hud-ink);border:1px solid var(--hud-line);font-family:var(--display);font-size:13px;letter-spacing:.04em;box-shadow:0 4px 14px rgba(0,0,0,.3)}
 .b-panel{flex:0 0 auto;background:var(--panel);color:var(--ink);border-radius:16px 16px 0 0;padding:8px 10px 10px;display:flex;flex-direction:column;gap:8px}
 .b-info{min-height:54px;font-size:14px}
 .b-cards{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-x;scrollbar-width:none;padding:1px}
@@ -305,6 +306,7 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
       <div id="bBanner" class="b-banner hidden"></div>
       <div class="b-speed hidden" id="bSpeed"><button data-sp="0" aria-label="Pause">❚❚</button><button data-sp="1">1×</button><button data-sp="2">2×</button><button data-sp="4">4×</button></div>
       <div class="b-cam"><button id="bRotL" aria-label="Rotate left">⟲</button><button id="bRotR" aria-label="Rotate right">⟳</button><button class="snd" aria-label="Sound"></button></div>
+      <button class="b-desel hidden" id="bDesel">✕ Deselect</button>
       <div id="bLoad" class="busy hidden"><div class="spin"></div><div>Preparing the battlefield…</div></div>
     </div>
     <div class="b-panel">
@@ -2252,11 +2254,15 @@ function panBy(dx,dy){
   camT.tx=clamp(camT.tx-rx*dx*wpp+fx*dy*kf,-FX,FX);camT.tz=clamp(camT.tz-rz*dx*wpp+fz*dy*kf,-FZ,FZ);
 }
 const zoomTo=d=>{camT.d=clamp(d,22,240);};
+const HOLD_MS=450;
 function attachPointer(el){
   const ptrs=new Map();let g=null;
+  const fire=(x,y,hold)=>{const r=el.getBoundingClientRect();onTap(x-r.left,y-r.top,hold,g.touch);};
+  const noHold=()=>{if(g&&g.hold){clearTimeout(g.hold);g.hold=0;}};
   el.addEventListener('pointerdown',e=>{
-    if(!B||!R3.scene)return;try{el.setPointerCapture(e.pointerId);}catch(err){}ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
-    if(ptrs.size===1)g={mode:e.button===2?'rot':'tap',x0:e.clientX,y0:e.clientY,t0:performance.now(),lx:e.clientX,ly:e.clientY};
+    if(!B||!R3.scene)return;try{el.setPointerCapture(e.pointerId);}catch(err){}ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});noHold();
+    if(ptrs.size===1){g={mode:e.button===2?'rot':'tap',x0:e.clientX,y0:e.clientY,t0:performance.now(),lx:e.clientX,ly:e.clientY,touch:e.pointerType!=='mouse'};
+      if(g.mode==='tap')g.hold=setTimeout(()=>{if(g&&g.mode==='tap'&&ptrs.size===1){g.hold=0;g.mode='held';fire(g.x0,g.y0,true);}},HOLD_MS);} // press and hold fires while the finger is still down
     else if(ptrs.size===2){const [a,b]=[...ptrs.values()];g={mode:'multi',d0:Math.hypot(a.x-b.x,a.y-b.y)||1,a0:Math.atan2(b.y-a.y,b.x-a.x),cd:camT.d,cy:camT.yaw,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};}
   });
   el.addEventListener('pointermove',e=>{
@@ -2264,42 +2270,57 @@ function attachPointer(el){
     if(g.mode==='multi'&&ptrs.size>=2){const [a,b]=[...ptrs.values()],mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
       zoomTo(g.cd*g.d0/Math.max(20,Math.hypot(a.x-b.x,a.y-b.y)));camT.yaw=g.cy+(Math.atan2(b.y-a.y,b.x-a.x)-g.a0);
       panBy(mx-g.mx,my-g.my);g.mx=mx;g.my=my;return;}
-    if(g.mode==='tap'&&Math.hypot(e.clientX-g.x0,e.clientY-g.y0)>8)g.mode='pan';
+    if((g.mode==='tap'||g.mode==='held')&&Math.hypot(e.clientX-g.x0,e.clientY-g.y0)>(g.touch?12:8)){g.mode='pan';noHold();} // fingers wobble more than a mouse
     if(g.mode==='pan')panBy(e.clientX-g.lx,e.clientY-g.ly);
     else if(g.mode==='rot'){camT.yaw-=(e.clientX-g.lx)*.008;zoomTo(camT.d*(1+(e.clientY-g.ly)*.004));}
-    g.lx=e.clientX;g.ly=e.clientY;
+    if(g.mode==='pan'||g.mode==='rot'){g.lx=e.clientX;g.ly=e.clientY;} // a drag pans from where the finger first landed
   });
   const up=e=>{
     if(!ptrs.has(e.pointerId))return;ptrs.delete(e.pointerId);
-    if(g&&g.mode==='tap'&&!ptrs.size&&e.type==='pointerup'&&performance.now()-g.t0<650){const r=el.getBoundingClientRect();onTap(e.clientX-r.left,e.clientY-r.top);}
-    if(!ptrs.size)g=null;else if(g&&g.mode==='multi'){const [a]=[...ptrs.values()];g={mode:'pan',lx:a.x,ly:a.y};}
+    if(g&&g.mode==='tap'&&!ptrs.size&&e.type==='pointerup'){noHold();fire(e.clientX,e.clientY,performance.now()-g.t0>=HOLD_MS);}
+    if(!ptrs.size){noHold();g=null;}else if(g&&g.mode==='multi'){const [a]=[...ptrs.values()];g={mode:'pan',lx:a.x,ly:a.y};}
   };
   el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up);
   el.addEventListener('contextmenu',e=>e.preventDefault());
   el.addEventListener('wheel',e=>{e.preventDefault();zoomTo(camT.d*Math.exp(e.deltaY*.0012));},{passive:false});
 }
-function onTap(px,py){
+function onTap(px,py,hold,touch){
   if(!B||B.over||B.headless)return;
   R3.ray.setFromCamera(new THREE.Vector2(px/R3.W*2-1,-(py/R3.H)*2+1),R3.cam);
-  const hit=R3.ray.intersectObject(R3.ground)[0],pt=hit?hit.point:null,cands=[];
-  for(const u of B.units){if(!onField(u))continue;let sc=1e9;
-    if(pt){const d=ptSeg(pt.x,pt.z,seg(u))[0];if(d<u.dm.hd+2.5)sc=d;}
-    const p=projectU(u,labH(u)*.6);if(p){const s=Math.hypot(p[0]-px,p[1]-py);if(s<30)sc=Math.min(sc,s*.15);}
-    if(sc<1e9)cands.push([sc,u]);}
+  const hit=R3.ray.intersectObject(R3.ground)[0],pt=hit?hit.point:null,o=R3.ray.ray.origin,dv=R3.ray.ray.direction,cands=[];
+  const rad=touch?44:30,bx=touch?24:16,bt=touch?36:28,bb=touch?8:3;
+  for(const u of B.units){if(!onField(u))continue;let sc=1e9,lab=false;
+    const lp=u.lab&&u.lab.style.display!=='none'?projectU(u,labH(u)):null; // the floating badge is drawn over everything, so a tap on it always wins
+    if(lp&&Math.abs(px-lp[0])<bx&&py>lp[1]-bt&&py<lp[1]+bb){sc=-50+Math.hypot(px-lp[0],py-lp[1]+13)*.05;lab=true;}
+    else{
+      if(dv.y<-1e-4){const t=(heightAt(u.x,u.z)+labH(u)*.3-o.y)/dv.y,e=ptSeg(o.x+dv.x*t,o.z+dv.z*t,seg(u))[0]-u.dm.hd; // where the tap passes through the men at chest height, not the ground behind them
+        if(e<2.5)sc=e;}
+      const p=projectU(u,labH(u)*.3);if(p){const s=Math.hypot(p[0]-px,p[1]-py);if(s<rad)sc=Math.min(sc,s*.12);}}
+    if(sc<1e9)cands.push([sc,u,lab]);}
   cands.sort((a,b)=>a[0]-b[0]);
-  const foe=B.phase==='battle'&&B.sel.size?cands.find(c=>c[1].side===1):null,c=foe||cands[0];
-  if(c)unitTap(c[1]);else if(pt)groundTap(pt);
+  let c=cands[0];
+  if(!hold&&c&&!c[2]&&c[1].side===0&&B.phase==='battle'&&B.sel.size){const f=cands.find(x=>x[1].side===1);if(f&&f[0]<c[0]+.75)c=f;} // too close to call beside an enemy: attack rather than reselect
+  if(hold){if(c)unitHold(c[1]);else if(B.sel.size||B.insp!=null){buzz();deselect();}}
+  else if(c)unitTap(c[1]);else if(pt)groundTap(pt);
 }
+const buzz=()=>{try{const ua=navigator.userActivation;if(navigator.vibrate&&(!ua||ua.hasBeenActive))navigator.vibrate(12);}catch(e){}}; // a tick on Android when a hold lands; iPhones have no vibrate
+function deselect(){if(!B||B.over||B.headless)return;B.sel.clear();B.insp=null;hud();}
 function unitTap(u){
   if(!B||B.over||B.headless)return;
-  if(u.side===0){if(!active(u))return;if(B.sel.size===1&&B.sel.has(u.uid))B.sel.clear();else{B.sel=new Set([u.uid]);AU.ui('select');}B.insp=null;}
+  if(u.side===0){if(!active(u))return;if(B.sel.has(u.uid))B.sel.delete(u.uid);else{B.sel=new Set([u.uid]);AU.ui('select');}B.insp=null;} // tapping a selected unit again drops it
   else if(B.phase==='battle'&&selUnits().length){orderAttack(selUnits(),u);B.insp=null;}
   else B.insp=B.insp===u.uid?null:u.uid;
   hud();
 }
+function unitHold(u){ // press and hold: add to or drop from the group, or look at an enemy without attacking it
+  if(!B||B.over||B.headless)return;
+  if(u.side===0){if(!active(u))return;if(B.sel.has(u.uid))B.sel.delete(u.uid);else{B.sel.add(u.uid);AU.ui('select');}B.insp=null;}
+  else B.insp=B.insp===u.uid?null:u.uid;
+  buzz();hud();
+}
 function groundTap(pt){
-  const sel=selUnits();
-  if(!sel.length){B.insp=null;return hud();}
+  const sel=selUnits();B.insp=null;
+  if(!sel.length)return hud();
   if(B.phase==='deploy')deployMove(sel,pt);else orderMove(sel,pt);
   hud();
 }
@@ -2316,6 +2337,7 @@ document.addEventListener('keydown',e=>{
   else if(k==='a'||k==='arrowleft')mv(-rx,-rz);else if(k==='d'||k==='arrowright')mv(rx,rz);
   else if(k==='q')camT.yaw-=.25;else if(k==='e')camT.yaw+=.25;
   else if(k===' '&&B.phase==='battle'&&!B.headless){e.preventDefault();setSpeed(B.speed?0:(B.lastSpeed||1));}
+  else if(k==='escape')deselect();
   else return;
 });
 
@@ -2335,7 +2357,7 @@ function buildHud(){
   for(const u of B.units){
     if(u.side===0)u.card=el.querySelector(`[data-u="${u.uid}"]`);
     const d=document.createElement('div');d.className='blab'+(u.side===0?' mine':'');d.innerHTML=symSvg(u.kind,FACTIONS[u.fid].color,24)+'<i><b></b></i>';
-    d.onclick=()=>unitTap(u);L.appendChild(d);u.lab=d;u.labBar=d.querySelector('b');}
+    L.appendChild(d);u.lab=d;u.labBar=d.querySelector('b');}
 }
 function hud(){
   if(!B)return;const dep=B.phase==='deploy';
@@ -2345,6 +2367,8 @@ function hud(){
   const main=$('#bMain'),locked=B.over||B.headless;
   main.textContent=dep?'Begin Battle':'Halt';main.className='btn '+(dep?'primary':'ghost');main.disabled=locked||(!dep&&!B.sel.size);
   $('#bAuto').disabled=$('#bWithdraw').disabled=$('#bAll').disabled=locked;
+  const nAv=B.units.filter(u=>u.side===0&&active(u)).length;$('#bAll').textContent=B.sel.size&&B.sel.size===nAv?'None':'All';
+  $('#bDesel').classList.toggle('hidden',locked||(!B.sel.size&&B.insp==null));
   $('#bSpeed').classList.toggle('hidden',dep||locked);
   $('#bSpeed').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.sp===B.speed));
   for(const u of B.units){
@@ -2355,10 +2379,10 @@ function hud(){
       u.card.classList.toggle('sel',sel);u.card.classList.toggle('rout',u.state==='rout');u.card.classList.toggle('gone',!onField(u));}}
   const sel=selUnits(),ins=B.insp!=null?unitById(B.insp):null;let h;
   if(B.headless)h='<div class="b-tip">Resolving the battle…</div>';
-  else if(sel.length===1)h=unitLine(sel[0]);
-  else if(sel.length>1)h=`<div class="b-tip"><b>${sel.length} units selected.</b> ${dep?'Tap inside the blue zone to place them.':'Tap the ground to march in formation, or an enemy to attack.'}</div>`;
   else if(ins)h=unitLine(ins);
-  else if(dep)h=`<div class="b-tip"><b>Deploy your army.</b> Tap a unit or its card, then tap inside the blue zone. Drag to pan, pinch or scroll to zoom, ⟲ ⟳ to rotate.${B.walls&&B.defSide===1?' The enemy holds walls — enter through the gates.':''}</div>`;
+  else if(sel.length===1)h=unitLine(sel[0]);
+  else if(sel.length>1)h=`<div class="b-tip"><b>${sel.length} units selected.</b> ${dep?'Tap inside the blue zone to place them.':'Tap the ground to march in formation, or an enemy to attack.'} Hold a unit to add or drop it.</div>`;
+  else if(dep)h=`<div class="b-tip"><b>Deploy your army.</b> Tap a unit or its card, then tap inside the blue zone. Tap it again to deselect; hold a unit to add it to a group. Drag to pan, pinch to zoom.${B.walls&&B.defSide===1?' The enemy holds walls — enter through the gates.':''}</div>`;
   else h=`<div class="b-tip"><b>${B.speed?'Battle on.':'Paused — orders still work.'}</b> Select units, then tap the ground to march or an enemy to attack. Charge, and hit flanks and rear to break them. ${B.defSide===0?'Hold until time runs out.':'Break them before time runs out.'}</div>`;
   if(h!==B.lastInfo){$('#bInfo').innerHTML=h;B.lastInfo=h;}
 }
@@ -2439,6 +2463,7 @@ $('#bMain').onclick=()=>{if(!B||B.over||B.headless)return;if(B.phase==='deploy')
 $('#bAuto').onclick=autoFinish;
 $('#bWithdraw').onclick=withdraw;
 $('#bAll').onclick=()=>{if(!B||B.over||B.headless)return;const av=B.units.filter(u=>u.side===0&&active(u));B.sel=B.sel.size===av.length?new Set():new Set(av.map(u=>u.uid));B.insp=null;hud();};
+$('#bDesel').onclick=deselect;
 $('#bSpeed').querySelectorAll('button').forEach(b=>b.onclick=()=>setSpeed(+b.dataset.sp));
 $('#bRotL').onclick=()=>{camT.yaw-=Math.PI/6;};$('#bRotR').onclick=()=>{camT.yaw+=Math.PI/6;};
 
