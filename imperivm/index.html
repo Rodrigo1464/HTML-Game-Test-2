@@ -1171,7 +1171,7 @@ function battleAudio(dt){ // fighting noise, hoofbeats and the music's intensity
   const on=B.units.filter(onField),fight=on.filter(u=>u.contacts.length),rt=on.filter(u=>u.state==='rout').length;
   AU.crowd(Math.min(1,fight.length/6));
   AU.inten(.4+.4*Math.min(1,fight.length/8)+.2*Math.min(1,rt/3));
-  const n=Math.min(4,Math.round(fight.length*.45+Math.random()));
+  const n=fight.length?Math.min(4,Math.round(fight.length*.45+Math.random())):0;
   for(let k=0;k<n;k++){const u=pick(fight),[v,p]=spat(u.x,u.z);AU.clash(v*.7,p,Math.random()<.45);}
   const cv=on.filter(u=>u.running&&isCav(u)&&u.state==='ok');
   if(cv.length){const u=cv[0],[v,p]=spat(u.x,u.z);AU.hooves(v,p,cv.length);}
@@ -1207,8 +1207,9 @@ function mkBU(cu,side,fid){
     x:0,z:0,face:homeFace(side),order:'none',dest:null,target:null,orderT:-9,running:false,runD:0,spd:0,contacts:[],prim:null,disen:false,
     chargeT:{},ammo:T.ammo?T.ammo*2+2:0,reload:Math.random()*2,pend:0,fought:false,rallies:0,skirmT:0,home:null,figs:[],alive:[],sg:null};
   const n=Math.max(1,Math.ceil(cu.men/L.per));
-  for(let i=0;i<n;i++)u.figs.push({alive:true,fled:false,fall:0,x:0,z:0,y:0,bob:0,yaw:u.face,ph:Math.random()*6.28,jx:(Math.random()-.5)*.35,jz:(Math.random()-.5)*.35,mi:0,key:null});
-  u.alive=u.figs.slice();u.dm=dims(u);
+  for(let i=0;i<n;i++)u.figs.push({u,alive:true,fled:false,fall:0,x:0,z:0,y:0,yaw:u.face,ph:Math.random()*6.28,jx:(Math.random()-.5)*.35,jz:(Math.random()-.5)*.35,mi:0,key:null,
+    sc:.94+Math.random()*.12,wp:Math.random()*6.28,wa:0,g:0,sw:-1,swk:null,wait:0,cd:Math.random()*1.5,foe:null,hit:0,kv:0,kx:0,kz:0,die:null,roll:1,air:false,ay:0,vx:0,vy:0,vz:0});
+  u.alive=u.figs.slice();u.dm=dims(u);u.wk=WEAP(u);
   return u;
 }
 function dims(u){const n=Math.max(1,u.alive.length),f=Math.min(u.L.files,n),r=Math.ceil(n/f);return{f,r,hw:f*u.L.sx/2,hd:Math.max(1.4,r*u.L.sz/2)};}
@@ -1263,13 +1264,25 @@ function rout(u){
   for(const a of B.units)if(a!==u&&a.side===u.side&&active(a)&&Math.hypot(a.x-u.x,a.z-u.z)<30){a.mor-=u.kind==='gen'?12:6;checkMor(a);}
 }
 function unitDies(u){
-  u.state='dead';u.order='none';for(const f of u.alive)f.alive=false;u.alive=[];flt(u,'DESTROYED','#ffb3a6');sndEv('die',u);
+  u.state='dead';u.order='none';for(const f of u.alive){f.alive=false;fell(u,f,u.contacts.length>0);}u.alive=[];flt(u,'DESTROYED','#ffb3a6');sndEv('die',u);
   for(const a of B.units)if(a!==u&&a.side===u.side&&active(a)&&(u.kind==='gen'||Math.hypot(a.x-u.x,a.z-u.z)<30)){a.mor-=u.kind==='gen'?20:5;checkMor(a);}
 }
 function syncFigs(u,melee){ // drop figures to match the men left; melee losses come from the front rank
   const want=Math.max(1,Math.ceil(u.men/u.L.per));
-  while(u.alive.length>want){const i=Math.floor(Math.random()*(melee?Math.min(u.dm.f,u.alive.length):u.alive.length));u.alive[i].alive=false;u.alive.splice(i,1);}
+  while(u.alive.length>want){const i=Math.floor(Math.random()*(melee?Math.min(u.dm.f,u.alive.length):u.alive.length)),f=u.alive[i];f.alive=false;u.alive.splice(i,1);fell(u,f,melee);}
   u.dm=dims(u);
+}
+function fell(u,f,melee){ // how a man goes down: cut down by the man facing him, shot, or flung aside by a charge
+  f.fall=0;f.sw=-1;f.wait=0;f.roll=Math.random()<.5?-1:1;
+  const k=u.knock&&B.time-u.knock.t<.15?u.knock:null,e=melee&&!k?f.foe:null;let ax=0,az=0;
+  if(k){ax=k.x;az=k.z;const s=rnd(3,7)*(k.big?1.6:1);f.die='thrown';f.air=true;f.ay=0;f.vx=ax*s;f.vz=az*s;f.vy=rnd(3,6)*(k.big?1.3:1);}
+  else{
+    if(e&&e.alive){ax=f.x-e.x;az=f.z-e.z;if(e.sw<0||e.sw>=(HIT[e.swk]||1)){swing(e,e.u);e.sw=HIT[e.swk]-.08;}} // his opponent lands the killing blow
+    else if(u.hitFrom){ax=f.x-u.hitFrom[0];az=f.z-u.hitFrom[1];}
+    const r=Math.random();f.die=r<.6?'back':r<.85?'fwd':'side';}
+  const l=Math.hypot(ax,az);if(l>.01){ax/=l;az/=l;f.yaw=Math.atan2(-ax,-az);} // face the blow, so falling back means away from it
+  if(B.headless||!R3.bits)return;
+  if(melee||k)fxBlood(f.x,f.y+(isCav(u)?1.9:1.2),f.z,ax,az,k?8:5);
 }
 function hurt(u,lost,extra=0,mult=1,melee=false){
   if(!onField(u))return;lost=Math.min(u.men,Math.max(0,lost));u.men-=lost;
@@ -1281,6 +1294,7 @@ function hurt(u,lost,extra=0,mult=1,melee=false){
 function impact(a,b){ // a runs into b
   if(!active(a)||!a.running||a.runD<8)return;
   const braced=b.kind==='spear'&&active(b)&&flankAng(b,a)<1.05;a.runD=0;
+  chargeFX(a,b,braced&&big(a));
   if(braced&&big(a)){hurt(a,Math.round(a.men*.06),6,1,true);flt(b,'BRACED','#ffd166');sndCharge(b,true);return;}
   a.chargeT[b.uid]=4;flt(a,'CHARGE!','#ffd166');sndCharge(a);
   hurt(b,probRound(meleeDmg(a,b)*5/b.T.w),4+(a.T.charge||2)*.8+(a.kind==='eleph'?8:0),1,true);
@@ -1289,7 +1303,7 @@ function tryFire(u,t){
   if(u.reload>0||u.ammo<=0)return;
   u.reload=5+Math.random();u.ammo--;u.fought=true;
   const dmg=rangedDmg(u,t)*rnd(.8,1.2),fl=.8+Math.hypot(t.x-u.x,t.z-u.z)/55;
-  B.events.push({t:B.time+fl,fn:()=>{if(!onField(t))return;const m0=t.men;hurt(t,probRound(dmg/t.T.w),0,.8,false);B.rLoss[t.side]+=m0-t.men;if(!B.headless){const[v,p]=spat(t.x,t.z);AU.arrowHit(v,p,clamp(Math.round(dmg/8)+2,2,6));}}});
+  B.events.push({t:B.time+fl,fn:()=>{if(!onField(t))return;const m0=t.men;t.hitFrom=[u.x,u.z];hurt(t,probRound(dmg/t.T.w),0,.8,false);B.rLoss[t.side]+=m0-t.men;if(!B.headless){const[v,p]=spat(t.x,t.z);AU.arrowHit(v,p,clamp(Math.round(dmg/8)+2,2,6));}}});
   if(!B.headless){spawnVolley(u,t,fl);const[v,p]=spat(u.x,u.z);AU.volley(v,p,fl,u.T.cls==='sling');}
 }
 function fireTarget(u){
@@ -1501,17 +1515,22 @@ let _M,_q,_p,_s,_e,_d,_v,ZERO,ZAX;
 const SKIN=0xc99a6e,BRONZE=0xb38b3a,IRON=0x8c8f94,WOOD=0x6b4a2b,LEATHER=0x5a3f28,HORSE=0x6e4b31,HORSE_D=0x4a3322;
 const bx=(w,h,d)=>new THREE.BoxGeometry(w,h,d),cy=(a,b,h,s)=>new THREE.CylinderGeometry(a,b,h,s),cn=(r,h,s)=>new THREE.ConeGeometry(r,h,s);
 const prt=(geo,color,o={})=>({geo,color,o});
-function mergeParts(parts){ // bake parts into one flat-shaded, vertex-coloured geometry
+const jt=(j,p)=>(p.o.j=j,p); // hang a part from a joint of the rig (1 weapon arm, 2 shield arm, 3-6 legs, 7 neck/trunk, 10 tail, 11-12 ears, 13 bow)
+function mergeParts(parts,rig){ // bake parts into one flat-shaded, vertex-coloured geometry; with a rig, every vertex also carries its joint's pivot and id
   const T=THREE,m=new T.Matrix4(),q=new T.Quaternion(),e=new T.Euler(),gs=[];let n=0;
   for(const p of parts){const g=p.geo.index?p.geo.toNonIndexed():p.geo.clone(),o=p.o;p.geo.dispose();
     e.set(o.rx||0,o.ry||0,o.rz||0);q.setFromEuler(e);m.compose(new T.Vector3(o.x||0,o.y||0,o.z||0),q,new T.Vector3(o.sx||1,o.sy||1,o.sz||1));
-    g.applyMatrix4(m);gs.push([g,new T.Color(p.color)]);n+=g.attributes.position.count;}
-  const pos=new Float32Array(n*3),col=new Float32Array(n*3);let k=0;
-  for(const [g,c] of gs){const a=g.attributes.position.array,cnt=a.length/3;pos.set(a,k*3);
-    for(let i=0;i<cnt;i++){col[(k+i)*3]=c.r;col[(k+i)*3+1]=c.g;col[(k+i)*3+2]=c.b;}k+=cnt;g.dispose();}
+    g.applyMatrix4(m);gs.push([g,new T.Color(p.color),o.j||0]);n+=g.attributes.position.count;}
+  const pos=new Float32Array(n*3),col=new Float32Array(n*3),aj=rig?new Float32Array(n*4):null;let k=0;
+  for(const [g,c,j] of gs){const a=g.attributes.position.array,cnt=a.length/3,pv=rig&&rig[j]||[0,0,0];pos.set(a,k*3);
+    for(let i=0;i<cnt;i++){col[(k+i)*3]=c.r;col[(k+i)*3+1]=c.g;col[(k+i)*3+2]=c.b;if(aj)aj.set([pv[0],pv[1],pv[2],j],(k+i)*4);}k+=cnt;g.dispose();}
   const geo=new T.BufferGeometry();geo.setAttribute('position',new T.BufferAttribute(pos,3));geo.setAttribute('color',new T.BufferAttribute(col,3));
+  if(aj)geo.setAttribute('aJ',new T.BufferAttribute(aj,4));
   geo.computeVertexNormals();geo.computeBoundingSphere();return geo;
 }
+const FOOT_RIG={1:[.3,1.34,.05],2:[-.3,1.34,.05],3:[-.11,.8,0],4:[.11,.8,0],13:[-.3,1.34,.05]};
+const CAV_RIG={1:[.3,2.2,0],2:[-.3,2.2,0],3:[-.18,.9,.6],4:[.18,.9,.6],5:[-.18,.9,-.6],6:[.18,.9,-.6],7:[0,1.5,.62],10:[0,1.42,-.78]};
+const ELEPH_RIG={3:[-.6,1.6,1],4:[.6,1.6,1],5:[-.6,1.6,-1],6:[.6,1.6,-1],7:[0,2.55,2.7],11:[-.8,2.9,2.05],12:[.8,2.9,2.05]};
 function headParts(fid,y,neu){
   neu.push(prt(bx(.24,.26,.24),SKIN,{y}));
   const h=HELM[fid],dome=()=>new THREE.SphereGeometry(.17,6,4,0,Math.PI*2,0,Math.PI/2);
@@ -1523,45 +1542,71 @@ function headParts(fid,y,neu){
 }
 function shieldPart(fid,team,x,y,z,small){
   const s=SHIELD[fid],k=small?.7:1;
-  if(s==='scutum')team.push(prt(bx(.6*k,.95*k,.08),0xdddddd,{x,y,z}));
-  else if(s==='round')team.push(prt(cy(.45*k,.45*k,.07,10),0xdddddd,{x,y,z,rx:Math.PI/2}));
-  else team.push(prt(cy(.3*k,.3*k,.07,10),0xdddddd,{x,y,z,rx:Math.PI/2,sz:1.7}));
+  if(s==='scutum')team.push(jt(2,prt(bx(.6*k,.95*k,.08),0xdddddd,{x,y,z})));
+  else if(s==='round')team.push(jt(2,prt(cy(.45*k,.45*k,.07,10),0xdddddd,{x,y,z,rx:Math.PI/2})));
+  else team.push(jt(2,prt(cy(.3*k,.3*k,.07,10),0xdddddd,{x,y,z,rx:Math.PI/2,sz:1.7})));
 }
 function footFig(fid,kind,weap){
   const team=[],neu=[];
-  neu.push(prt(bx(.16,.8,.18),LEATHER,{x:-.11,y:.4}),prt(bx(.16,.8,.18),LEATHER,{x:.11,y:.4}));
+  neu.push(jt(3,prt(bx(.16,.8,.18),LEATHER,{x:-.11,y:.4})),jt(4,prt(bx(.16,.8,.18),LEATHER,{x:.11,y:.4})));
   team.push(prt(bx(.46,.62,.28),0xffffff,{y:1.11}),prt(bx(.52,.2,.32),0xaaaaaa,{y:.82}));
-  neu.push(prt(bx(.12,.5,.14),SKIN,{x:-.3,y:1.1,z:.05}),prt(bx(.12,.5,.14),SKIN,{x:.3,y:1.1,z:.05}));
+  neu.push(jt(2,prt(bx(.12,.5,.14),SKIN,{x:-.3,y:1.1,z:.05})));
+  neu.push(jt(1,kind==='spear'?prt(bx(.12,.14,.46),SKIN,{x:.3,y:1.34,z:.2}):prt(bx(.12,.5,.14),SKIN,{x:.3,y:1.1,z:.05}))); // spearmen hold the shaft level
   headParts(fid,1.57,neu);
-  if(kind==='inf'){shieldPart(fid,team,-.3,1.05,.24);neu.push(prt(bx(.05,.05,.62),0xd8d8d8,{x:.32,y:1.0,z:.35,rx:-.3}));}
-  else if(kind==='spear'){shieldPart(fid,team,-.28,1.15,.26);neu.push(prt(cy(.025,.025,3.0,4),WOOD,{x:.3,y:1.45,z:.75,rx:1.35}),prt(cn(.05,.22,4),IRON,{x:.3,y:1.8,z:2.31,rx:1.35}));}
-  else if(weap==='bow')neu.push(prt(new THREE.TorusGeometry(.5,.025,4,8,Math.PI),WOOD,{x:-.32,y:1.2,z:.3,rz:-Math.PI/2,ry:-Math.PI/2}),prt(bx(.14,.5,.14),LEATHER,{x:.1,y:1.2,z:-.22,rx:.2}));
-  else if(weap==='sling')neu.push(prt(bx(.18,.16,.12),LEATHER,{x:-.26,y:.86,z:.1}),prt(bx(.03,.42,.03),0x9a8a6a,{x:.32,y:1.45,z:.1}));
-  else{shieldPart(fid,team,-.28,1.05,.22,true);neu.push(prt(cy(.02,.02,1.6,4),WOOD,{x:.3,y:1.5,z:.2,rx:.35}),prt(cy(.02,.02,1.6,4),WOOD,{x:.36,y:1.5,z:.12,rx:.25}));}
-  return{team,neu};
+  if(kind==='inf'){shieldPart(fid,team,-.3,1.05,.24);neu.push(jt(1,prt(bx(.05,.05,.62),0xd8d8d8,{x:.32,y:1.0,z:.35,rx:-.3})));}
+  else if(kind==='spear'){shieldPart(fid,team,-.28,1.15,.26);neu.push(jt(1,prt(cy(.025,.025,3.0,4),WOOD,{x:.3,y:1.45,z:.75,rx:1.35})),jt(1,prt(cn(.05,.22,4),IRON,{x:.3,y:1.8,z:2.31,rx:1.35})));}
+  else if(weap==='bow')neu.push(jt(13,prt(new THREE.TorusGeometry(.5,.025,4,8,Math.PI),WOOD,{x:-.32,y:1.2,z:.3,rz:-Math.PI/2,ry:-Math.PI/2})),prt(bx(.14,.5,.14),LEATHER,{x:.1,y:1.2,z:-.22,rx:.2}));
+  else if(weap==='sling')neu.push(prt(bx(.18,.16,.12),LEATHER,{x:-.26,y:.86,z:.1}),jt(1,prt(bx(.03,.42,.03),0x9a8a6a,{x:.32,y:.7,z:.1})));
+  else{shieldPart(fid,team,-.28,1.05,.22,true);neu.push(jt(1,prt(cy(.02,.02,1.6,4),WOOD,{x:.3,y:1.5,z:.2,rx:.35})),jt(1,prt(cy(.02,.02,1.6,4),WOOD,{x:.36,y:1.5,z:.12,rx:.25})));}
+  return{team,neu,rig:FOOT_RIG};
 }
 function cavFig(fid,kind){
   const team=[],neu=[],hc=kind==='gen'?0xd9d2c3:HORSE,y0=1.45;
-  neu.push(prt(bx(.56,.62,1.6),hc,{y:1.18}),prt(bx(.3,.62,.36),hc,{y:1.62,z:.78,rx:-.55}),prt(bx(.24,.28,.58),hc,{y:1.9,z:1.08}));
-  for(const [x,z] of [[-.18,.6],[.18,.6],[-.18,-.6],[.18,-.6]])neu.push(prt(bx(.13,.9,.14),HORSE_D,{x,y:.45,z}));
-  neu.push(prt(bx(.09,.55,.09),HORSE_D,{y:1.15,z:-.86,rx:.45}));
+  neu.push(prt(bx(.56,.62,1.6),hc,{y:1.18}),jt(7,prt(bx(.3,.62,.36),hc,{y:1.62,z:.78,rx:-.55})),jt(7,prt(bx(.24,.28,.58),hc,{y:1.9,z:1.08})));
+  [[-.18,.6],[.18,.6],[-.18,-.6],[.18,-.6]].forEach(([x,z],i)=>neu.push(jt(3+i,prt(bx(.13,.9,.14),HORSE_D,{x,y:.45,z}))));
+  neu.push(jt(10,prt(bx(.09,.55,.09),HORSE_D,{y:1.15,z:-.86,rx:.45})));
   team.push(prt(bx(.62,.38,1.0),0xbbbbbb,{y:1.28}),prt(bx(.44,.58,.27),0xffffff,{y:y0+.55}));
-  neu.push(prt(bx(.5,.18,.5),LEATHER,{y:y0+.18}),prt(bx(.12,.48,.14),SKIN,{x:-.3,y:y0+.52}),prt(bx(.12,.48,.14),SKIN,{x:.3,y:y0+.52}));
+  neu.push(prt(bx(.5,.18,.5),LEATHER,{y:y0+.18}),jt(2,prt(bx(.12,.48,.14),SKIN,{x:-.3,y:y0+.52})));
+  neu.push(jt(1,kind==='gen'?prt(bx(.12,.48,.14),SKIN,{x:.3,y:y0+.52}):prt(bx(.12,.14,.44),SKIN,{x:.3,y:y0+.72,z:.2})));
   headParts(fid,y0+1.0,neu);
-  if(kind==='gen'){team.push(prt(bx(.5,.85,.05),0x999999,{y:1.95,z:-.2,rx:.25}));neu.push(prt(bx(.05,.05,.8),0xdadada,{x:.33,y:1.9,z:.4,rx:-.4}),prt(bx(.06,.4,.3),0xf2c94c,{y:y0+1.4}));}
-  else{shieldPart(fid,team,-.32,1.95,.05,true);neu.push(prt(cy(.025,.025,3.2,4),WOOD,{x:.32,y:2.0,z:.8,rx:1.3}),prt(cn(.05,.22,4),IRON,{x:.32,y:2.45,z:2.44,rx:1.3}));}
-  return{team,neu};
+  if(kind==='gen'){team.push(prt(bx(.5,.85,.05),0x999999,{y:1.95,z:-.2,rx:.25}));neu.push(jt(1,prt(bx(.05,.05,.8),0xdadada,{x:.33,y:1.8,z:.4,rx:-.4})),prt(bx(.06,.4,.3),0xf2c94c,{y:y0+1.4}));}
+  else{shieldPart(fid,team,-.32,1.95,.05,true);neu.push(jt(1,prt(cy(.025,.025,3.2,4),WOOD,{x:.32,y:2.25,z:.8,rx:1.3})),jt(1,prt(cn(.05,.22,4),IRON,{x:.32,y:2.7,z:2.44,rx:1.3})));}
+  return{team,neu,rig:CAV_RIG};
 }
 function elephFig(){
   const team=[],neu=[],GR=0x86817a,TUSK=0xf2ead8;
-  neu.push(prt(bx(1.9,1.8,3.0),GR,{y:2.4}),prt(bx(1.4,1.4,1.1),GR,{y:2.9,z:1.9}),prt(bx(.12,1.1,.9),GR,{x:-.8,y:2.9,z:1.6}),prt(bx(.12,1.1,.9),GR,{x:.8,y:2.9,z:1.6}));
-  neu.push(prt(cy(.2,.12,2.0,6),GR,{y:1.6,z:2.55,rx:.2}),prt(cn(.09,1.0,5),TUSK,{x:-.35,y:2.0,z:2.6,rx:1.9}),prt(cn(.09,1.0,5),TUSK,{x:.35,y:2.0,z:2.6,rx:1.9}));
-  for(const [x,z] of [[-.6,1],[.6,1],[-.6,-1],[.6,-1]])neu.push(prt(cy(.36,.36,1.6,6),GR,{x,y:.8,z}));
+  neu.push(prt(bx(1.9,1.8,3.0),GR,{y:2.4}),prt(bx(1.4,1.4,1.1),GR,{y:2.9,z:1.9}),jt(11,prt(bx(.12,1.1,.9),GR,{x:-.8,y:2.9,z:1.6})),jt(12,prt(bx(.12,1.1,.9),GR,{x:.8,y:2.9,z:1.6})));
+  neu.push(jt(7,prt(cy(.2,.12,2.0,6),GR,{y:1.6,z:2.55,rx:.2})),prt(cn(.09,1.0,5),TUSK,{x:-.35,y:2.0,z:2.6,rx:1.9}),prt(cn(.09,1.0,5),TUSK,{x:.35,y:2.0,z:2.6,rx:1.9}));
+  [[-.6,1],[.6,1],[-.6,-1],[.6,-1]].forEach(([x,z],i)=>neu.push(jt(3+i,prt(cy(.36,.36,1.6,6),GR,{x,y:.8,z}))));
   team.push(prt(bx(1.5,1.0,1.5),0xcccccc,{y:3.8}),prt(bx(2.0,.3,2.4),0x999999,{y:3.3}));
   neu.push(prt(bx(.24,.26,.24),SKIN,{x:-.3,y:4.5}),prt(bx(.24,.26,.24),SKIN,{x:.3,y:4.5}),prt(bx(.24,.26,.24),SKIN,{y:3.9,z:1.6}));
-  return{team,neu};
+  return{team,neu,rig:ELEPH_RIG};
 }
 const missileWeap=u=>u.T.cls==='archer'?'bow':u.T.cls==='sling'?'sling':'jav';
+const WEAP=u=>u.kind==='spear'?'spear':u.kind==='missile'?missileWeap(u):u.kind==='cav'?'lance':u.kind==='gen'?'chop':u.kind==='eleph'?'tusk':'sword';
+function rigMats(){ // limbs swing about their joints in the vertex shader, posed per soldier by two instanced vec4s:
+  // aA = (stride phase, stride amount, weapon-arm raise, weapon-arm push), aB = (weapon-arm yaw, shield-arm raise, shield lift, neck/trunk)
+  const T=THREE,head=`attribute vec4 aJ;attribute vec4 aA;attribute vec4 aB;uniform float uT;
+mat3 rX(float a){float c=cos(a),s=sin(a);return mat3(1.,0.,0.,0.,c,s,0.,-s,c);}
+mat3 rY(float a){float c=cos(a),s=sin(a);return mat3(c,0.,-s,0.,1.,0.,s,0.,c);}
+mat3 rig(out vec3 t){
+  float j=aJ.w;t=vec3(0.);
+  if(j<.5)return mat3(1.);
+  if(j>12.5){vec3 c=vec3(-.32,1.2,.3)-aJ.xyz;mat3 M=rX(-aB.y*.15);t=rX(-aB.y)*c-M*c;return M;} // the bow rides in the hand but stays upright
+  if(j<1.5){t=vec3(0.,0.,aA.w);return rY(aB.x)*rX(-aA.z);}
+  if(j<2.5){t=vec3(0.,aB.z,aB.z*.3);return rY(.15*min(aB.y,1.))*rX(-aB.y);}
+  if(j<6.5){float o=(j<3.5||j>5.5)?0.:3.1416;return rX(sin(aA.x+o)*aA.y*.6);}
+  if(j<7.5)return rX(aB.w);
+  if(j<10.5)return rY(sin(uT*2.3+aA.x)*.4);
+  return rY((j<11.5?-1.:1.)*(.1+.25*sin(uT*1.7+aA.x)));
+}
+`,pos='vec3 rT;mat3 rM=rig(rT);vec3 transformed=rM*(position-aJ.xyz)+aJ.xyz+rT;';
+  const mat=new T.MeshLambertMaterial({vertexColors:true}),dep=new T.MeshDepthMaterial({depthPacking:T.RGBADepthPacking});
+  mat.onBeforeCompile=sh=>{sh.uniforms.uT=R3.uT;sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\n'+head)
+    .replace('#include <beginnormal_vertex>','vec3 rT0;vec3 objectNormal=rig(rT0)*normal;').replace('#include <begin_vertex>',pos);};
+  dep.onBeforeCompile=sh=>{sh.uniforms.uT=R3.uT;sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\n'+head).replace('#include <begin_vertex>',pos);};
+  return[mat,dep];
+}
 const figKey=u=>u.fid+'|'+u.kind+'|'+(u.kind==='missile'?missileWeap(u):'');
 function figParts(u){return u.kind==='eleph'?elephFig():isCav(u)?cavFig(u.fid,u.kind):footFig(u.fid,u.kind,missileWeap(u));}
 
@@ -1644,67 +1689,173 @@ function buildScene(){
   const sun=new T.DirectionalLight(0xfff0d8,2.4);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);
   sun.shadow.camera.near=10;sun.shadow.camera.far=420;sun.shadow.bias=-.0006;sun.shadow.normalBias=.5;s.add(sun);s.add(sun.target);R3.sun=sun;R3.shadowSz=0;
   R3.ground=buildGround(s);buildScenery(s);R3.zone=buildZone(s);
-  const mat=new T.MeshLambertMaterial({vertexColors:true}),groups={};
+  R3.clk=0;R3.shake=0;R3.uT={value:0};[R3.figMat,R3.figDepth]=rigMats();
+  const groups={};
   for(const u of B.units){const k=figKey(u);(groups[k]=groups[k]||{u,n:0}).n+=u.figs.length;}
   R3.fm={};
-  for(const k in groups){const {u,n}=groups[k],parts=figParts(u),team=new T.InstancedMesh(mergeParts(parts.team),mat,n),neu=new T.InstancedMesh(mergeParts(parts.neu),mat,n);
-    for(const m of [team,neu]){m.castShadow=true;m.frustumCulled=false;m.instanceMatrix.setUsage(T.DynamicDrawUsage);s.add(m);}
-    R3.fm[k]={team,neu,i:0};}
-  const c=new T.Color();
-  for(const u of B.units){const k=figKey(u),fm=R3.fm[k];c.set(FACTIONS[u.fid].color);for(const f of u.figs){f.key=k;f.mi=fm.i++;fm.team.setColorAt(f.mi,c);}}
-  R3.proj=new T.InstancedMesh(mergeParts([prt(bx(.05,.05,1.1),0x3b2a1a),prt(cn(.06,.18,4),0x777777,{z:.6,rx:Math.PI/2})]),mat,700);
-  R3.proj.frustumCulled=false;R3.proj.instanceMatrix.setUsage(T.DynamicDrawUsage);for(let i=0;i<700;i++)R3.proj.setMatrixAt(i,ZERO);s.add(R3.proj);
-  R3.projFree=[...Array(700).keys()];
+  for(const k in groups){const {u,n}=groups[k],parts=figParts(u),aA=new T.InstancedBufferAttribute(new Float32Array(n*4),4),aB=new T.InstancedBufferAttribute(new Float32Array(n*4),4);
+    aA.setUsage(T.DynamicDrawUsage);aB.setUsage(T.DynamicDrawUsage);
+    const mk=ps=>{const g=mergeParts(ps,parts.rig);g.setAttribute('aA',aA);g.setAttribute('aB',aB);const m=new T.InstancedMesh(g,R3.figMat,n);
+      m.customDepthMaterial=R3.figDepth;m.castShadow=true;m.frustumCulled=false;m.instanceMatrix.setUsage(T.DynamicDrawUsage);s.add(m);return m;};
+    R3.fm[k]={team:mk(parts.team),neu:mk(parts.neu),aA,aB,i:0};}
+  const c=new T.Color(),fc=new T.Color();
+  for(const u of B.units){const k=figKey(u),fm=R3.fm[k];fc.set(FACTIONS[u.fid].color); // no two men quite alike: cloth and skin tones vary a little
+    for(const f of u.figs){f.key=k;f.mi=fm.i++;fm.team.setColorAt(f.mi,c.copy(fc).multiplyScalar(.86+Math.random()*.2));fm.neu.setColorAt(f.mi,c.setScalar(.9+Math.random()*.14));}}
+  R3.proj=new T.InstancedMesh(mergeParts([prt(bx(.05,.05,1.1),0x3b2a1a),prt(cn(.06,.18,4),0x777777,{z:.6,rx:Math.PI/2})]),new T.MeshLambertMaterial({vertexColors:true}),PROJ_N);
+  R3.proj.frustumCulled=false;R3.proj.instanceMatrix.setUsage(T.DynamicDrawUsage);for(let i=0;i<PROJ_N;i++)R3.proj.setMatrixAt(i,ZERO);s.add(R3.proj);
+  R3.projFree=[...Array(PROJ_N).keys()];
+  R3.dust=mkFX(s,500,true);R3.bits=mkFX(s,500,false);
   R3.rib=[];for(let i=0;i<30;i++)R3.rib.push(mkRibbon(s));
 }
 function teardown(){
   cancelAnimationFrame(R3.raf);R3.raf=0;AU.ambient(false);
   if(R3.scene)R3.scene.traverse(o=>{if(o.isInstancedMesh)o.dispose();if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});
+  if(R3.figDepth)R3.figDepth.dispose();
   R3.scene=null;if(R3.renderer)R3.renderer.renderLists.dispose();
   $('#bLabels').innerHTML='';$('#bCards').innerHTML='';$('#battle').classList.add('hidden');
 }
 
 /* ================= BATTLE: ANIMATION ================= */
-function spawnVolley(u,t,fl){
-  const n=Math.min(u.alive.length,24);
-  for(let k=0;k<n;k++){const i=R3.projFree.pop();if(i===undefined)break;
-    const f=u.alive[k],g=t.alive.length?t.alive[Math.floor(Math.random()*t.alive.length)]:t,gx=g.x+(Math.random()-.5)*2,gz=g.z+(Math.random()-.5)*2;
-    B.shots.push({i,p0:[f.x,f.y+1.6,f.z],p1:[gx,heightAt(gx,gz)+.3,gz],t0:B.time+Math.random()*.3,T:fl*(.9+Math.random()*.2),h:Math.hypot(gx-f.x,gz-f.z)*.22+3,sl:u.T.cls==='sling',q:null});}
+const PROJ_N=1500,REL=.35; // missiles leave the hand REL seconds after the throw starts
+const SLASH={gauls:.8,rebels:.6,samnium:.45,carthage:.45,etruria:.35,greeks:.25,rome:.2}; // overhead cuts vs thrusts
+const SWING={thrust:.5,slash:.62,spear:.55,lance:.6,chop:.62,tusk:.9,jav:.72,bow:.8,sling:.72}; // seconds per blow or shot
+const HIT={thrust:.55,slash:.58,spear:.55,lance:.55,chop:.58,tusk:.6}; // where in the swing the blow lands
+const READY={sword:.55,spear:0,lance:0,chop:.6,tusk:0,jav:.45,bow:.3,sling:.3},RELAX={sword:.15,spear:0,lance:0,chop:.3,tusk:0,jav:.12,bow:.1,sling:.1};
+const POSE={ // keys: [progress, arm raise, arm push, arm yaw, body lean]
+  thrust:[[0,.55,0,0,0],[.35,-.25,-.12,.15,-.06],[.55,1.35,.3,-.05,.2],[1,.55,0,0,0]],
+  slash:[[0,.55,0,0,0],[.4,2.8,0,.3,-.1],[.58,.4,.1,-.35,.22],[1,.55,0,0,0]],
+  spear:[[0,0,0,0,0],[.35,.04,-.35,0,-.05],[.55,-.06,.65,0,.18],[1,0,0,0,0]],
+  lance:[[0,0,0,0,0],[.35,-.12,-.35,0,0],[.55,.12,.7,0,0],[1,0,0,0,0]],
+  chop:[[0,.6,0,0,0],[.4,2.8,0,.3,0],[.58,.5,.1,-.3,0],[1,.6,0,0,0]],
+  tusk:[[0,0,0,0,0],[.4,0,0,0,-.1],[.6,0,0,0,.14],[1,0,0,0,0]],
+  jav:[[0,.12,0,0,0],[.3,3.0,-.1,0,-.15],[.5,1.4,.15,0,.2],[.75,.6,0,0,.05],[1,.12,0,0,0]],
+  bow:[[0,.1,0,0,0],[.3,1.5,-.3,-.25,0],[.44,1.55,-.32,-.25,0],[.5,1.45,.05,-.1,0],[1,.1,0,0,0]],
+  sling:[[0,.1,0,0,0],[.12,2.7,0,0,0],[.42,2.7,0,0,-.05],[.5,1.3,.1,0,.15],[1,.1,0,0,0]]
+};
+const PA=[0,0,0,0];
+function poseAt(k,p){const K=POSE[k];let i=1;while(i<K.length-1&&K[i][0]<p)i++;const a=K[i-1],b=K[i],t=sstep(a[0],b[0],p);for(let c=0;c<4;c++)PA[c]=a[c+1]+(b[c+1]-a[c+1])*t;return PA;}
+const REACH=u=>u.kind==='eleph'?3.4:isCav(u)?2:1.1;
+function swing(f,u){const w=u.wk;f.swk=w==='sword'?(Math.random()<(SLASH[u.fid]??.4)?'slash':'thrust'):HIT[w]?w:'thrust';f.sw=0;f.wait=0;}
+function findFoe(u,f){let best=null,bd=36;for(const e of u.contacts)for(const g of e.alive){const d=(g.x-f.x)**2+(g.z-f.z)**2;if(d<bd){bd=d;best=g;}}return best;}
+function blow(f){ // the moment a swing lands: parried in a shower of sparks, or the man reels back
+  const e=f.foe;if(!e||!e.alive)return;const dx=e.x-f.x,dz=e.z-f.z,l=Math.hypot(dx,dz)||1;if(l>5)return;
+  if(Math.random()<.5)fxSparks(f.x+dx*.55,f.y+(isCav(f.u)||isCav(e.u)?1.9:1.2),f.z+dz*.55,5);
+  else{e.hit=.3;e.kv=Math.max(e.kv,1.4);e.kx=dx/l;e.kz=dz/l;}
 }
-function updShots(){
+function chargeFX(a,b,braced){ // dust, a shove through the enemy front and a jolt of the camera
+  if(B.headless||!R3.dust)return;
+  const r=segSeg(a.sg,b.sg),cx=(r[1]+r[3])/2,cz=(r[2]+r[4])/2,bg=big(a),el=a.kind==='eleph';
+  let dx=b.x-a.x,dz=b.z-a.z;const l=Math.hypot(dx,dz)||1;dx/=l;dz/=l;
+  for(let i=0;i<(bg?10:5);i++)fxDust(cx+rnd(-1,1)*a.dm.hw,cz+rnd(-1.5,1.5),bg);
+  R3.shake=Math.max(R3.shake,(el?1.3:bg?.8:.35)*spat(cx,cz)[0]);
+  if(braced){a.knock={x:-dx,z:-dz,t:B.time};fxSparks(cx,heightAt(cx,cz)+1.8,cz,10);return;}
+  if(!bg)return;
+  b.knock={x:dx,z:dz,t:B.time,big:el};
+  for(let i=0;i<Math.min(b.alive.length,b.dm.f*2);i++){const f=b.alive[i];if((f.x-cx)**2+(f.z-cz)**2>(a.dm.hw+3)**2)continue;
+    f.kv=rnd(2.5,5.5)*(el?1.4:1);f.kx=dx;f.kz=dz;f.hit=.35;}
+}
+/* particles: dust, blood and sparks drawn as camera-facing discs, two instanced draws */
+function mkFX(scene,N,soft){
+  const T=THREE,g=new T.InstancedBufferGeometry();
+  g.setAttribute('position',new T.Float32BufferAttribute([-.5,-.5,0,.5,-.5,0,.5,.5,0,-.5,.5,0],3));g.setIndex([0,1,2,0,2,3]);
+  const P=new T.InstancedBufferAttribute(new Float32Array(N*4),4),C=new T.InstancedBufferAttribute(new Float32Array(N*4),4);
+  P.setUsage(T.DynamicDrawUsage);C.setUsage(T.DynamicDrawUsage);g.setAttribute('iP',P);g.setAttribute('iC',C);g.instanceCount=0;
+  const m=new T.Mesh(g,new T.ShaderMaterial({transparent:true,depthWrite:false,
+    vertexShader:'attribute vec4 iP;attribute vec4 iC;varying vec4 vC;varying vec2 vU;void main(){vC=iC;vU=position.xy*2.;vec4 mv=modelViewMatrix*vec4(iP.xyz,1.);mv.xy+=position.xy*iP.w;gl_Position=projectionMatrix*mv;}',
+    fragmentShader:`varying vec4 vC;varying vec2 vU;void main(){float d=dot(vU,vU);if(d>1.)discard;gl_FragColor=vec4(vC.rgb,vC.a${soft?'*(1.-d)':''});}`}));
+  m.frustumCulled=false;m.renderOrder=3;scene.add(m);return{m,P,C,N,list:[]};
+}
+function fxAdd(F,x,y,z,vx,vy,vz,life,s0,s1,col,a,grav,drag){
+  if(F.list.length<F.N)F.list.push({x,y,z,vx,vy,vz,t:0,life,s0,s1,r:(col>>16&255)/255,g:(col>>8&255)/255,b:(col&255)/255,a,grav,drag});
+}
+function fxUpd(F,dt){
+  const P=F.P.array,C=F.C.array;let k=0;
+  F.list=F.list.filter(p=>(p.t+=dt)<p.life);
+  for(const p of F.list){const q=p.t/p.life,dr=Math.exp(-p.drag*dt);p.vy-=p.grav*dt;p.vx*=dr;p.vy*=dr;p.vz*=dr;p.x+=p.vx*dt;p.y+=p.vy*dt;p.z+=p.vz*dt;
+    if(p.grav&&p.vy<0){const gy=heightAt(p.x,p.z)+.04;if(p.y<gy){p.y=gy;p.vx=p.vy=p.vz=p.grav=0;}} // specks settle on the grass
+    const o=k*4;P[o]=p.x;P[o+1]=p.y;P[o+2]=p.z;P[o+3]=p.s0+(p.s1-p.s0)*Math.sqrt(q);
+    C[o]=p.r;C[o+1]=p.g;C[o+2]=p.b;C[o+3]=p.a*Math.min(1,q*12)*(1-q);k++;}
+  F.m.geometry.instanceCount=k;F.P.needsUpdate=F.C.needsUpdate=true;
+}
+function fxDust(x,z,bg,k=1){const s=(bg?1.7:1)*k;fxAdd(R3.dust,x+rnd(-.6,.6),heightAt(x,z)+.4*s,z+rnd(-.6,.6),rnd(-.7,.7),rnd(.3,.9)*s,rnd(-.7,.7),rnd(1.3,2.3)*Math.sqrt(k),rnd(1,1.6)*s,rnd(3,4.5)*s,0xc9b48c,rnd(.22,.36),0,1.4);}
+function fxBlood(x,y,z,dx,dz,n){for(let i=0;i<n;i++){const s=rnd(1,3.2);fxAdd(R3.bits,x,y,z,dx*s+rnd(-1,1),rnd(1.2,3.4),dz*s+rnd(-1,1),rnd(1.5,3.5),rnd(.13,.2),.1,Math.random()<.5?0x7d1010:0x9e1c16,.95,14,.4);}}
+function fxSparks(x,y,z,n){for(let i=0;i<n;i++)fxAdd(R3.bits,x,y,z,rnd(-4,4),rnd(1,4.5),rnd(-4,4),rnd(.16,.3),.14,.05,Math.random()<.5?0xfff0b8:0xffc861,1,9,1.5);}
+
+function spawnVolley(u,t,fl){
+  const n=Math.min(u.alive.length,24);t.cover=B.time+fl+.4; // the target raises its shields
+  for(let k=0;k<n;k++){let i=R3.projFree.pop();if(i===undefined){const o=B.shots[0];if(!o||B.time-o.t0<o.T)break;i=B.shots.shift().i;} // reuse the oldest spent arrow
+    const f=u.alive[k],g=t.alive.length?t.alive[Math.floor(Math.random()*t.alive.length)]:t,gx=g.x+(Math.random()-.5)*2,gz=g.z+(Math.random()-.5)*2,st=Math.random()*.3;
+    f.swk=u.wk;f.sw=-1;f.wait=st+1e-3; // each man draws or winds up after a ragged delay; the missile leaves his hand REL later
+    B.shots.push({i,p0:[f.x,f.y+1.6,f.z],p1:[gx,heightAt(gx,gz)+.3,gz],t0:B.time+st+REL,T:Math.max(.35,fl-st-REL)*(.95+Math.random()*.1),h:Math.hypot(gx-f.x,gz-f.z)*.22+3,sl:u.T.cls==='sling',q:null,done:false});}
+}
+function updShots(){ // missiles arc to the target; arrows and javelins stay stuck in the ground
   const keep=[];
   for(const sh of B.shots){const el=B.time-sh.t0;
-    if(el>sh.T+3){R3.proj.setMatrixAt(sh.i,ZERO);R3.projFree.push(sh.i);continue;}
+    if(el>sh.T+(sh.sl?1:40)){R3.proj.setMatrixAt(sh.i,ZERO);R3.projFree.push(sh.i);continue;}
     keep.push(sh);if(el<0){R3.proj.setMatrixAt(sh.i,ZERO);continue;}
+    if(sh.done)continue;
     const t=Math.min(1,el/sh.T),[x0,y0,z0]=sh.p0,[x1,y1,z1]=sh.p1;
     _p.set(x0+(x1-x0)*t,y0+(y1-y0)*t+sh.h*4*t*(1-t),z0+(z1-z0)*t);
     if(t<1||!sh.q){_d.set(x1-x0,y1-y0+sh.h*4*(1-2*t),z1-z0).normalize();_q.setFromUnitVectors(ZAX,_d);sh.q=(sh.q||_q.clone()).copy(_q);}else _q.copy(sh.q);
     if(sh.sl)_s.set(t<1?2.4:0,t<1?2.4:0,.11);else _s.set(1,1,1);
+    if(t>=1){sh.done=true;if(Math.random()<.25)fxDust(x1,z1,false,.35);}
     _M.compose(_p,_q,_s);R3.proj.setMatrixAt(sh.i,_M);}
   B.shots=keep;R3.proj.instanceMatrix.needsUpdate=true;
 }
-function updFigs(vdt){ // soldiers walk to their slot in the formation; the dead fall where they stood
-  const t=performance.now()/1000;
+function updFigs(vdt){ // soldiers keep their place in the ranks, square off in melee, and fall where they are struck
+  const t=R3.clk+=vdt,snap=vdt>=50;R3.uT.value=t;
   for(const u of B.units){
-    const L=u.L,al=u.alive,n=al.length,d=u.dm,[lx,lz]=latV(u.face),[fx,fz]=fwdV(u.face);
-    const snap=vdt>=50,rt=u.state==='rout',spread=rt?2.4:1,jit=rt?6:1,fight=u.contacts.length>0&&!rt,maxS=(runSp(u)*1.5+3)*vdt,cav=isCav(u);
+    const L=u.L,al=u.alive,n=al.length,d=u.dm,[lx,lz]=latV(u.face),[fx,fz]=fwdV(u.face),cav=isCav(u),bg=big(u);
+    const rt=u.state==='rout',spread=rt?2.4:1,jit=rt?6:1,fight=u.contacts.length>0&&!rt,maxS=(runSp(u)*1.5+3)*vdt;
+    const reach=REACH(u),stride=u.kind==='eleph'?5:cav?3.4:1.7,gait=u.kind==='eleph'?15:cav?6:3.5,duel=fight?(u.kind==='spear'?2:1):0;
+    const guard=fight?1:u.cover>B.time&&u.wk!=='bow'&&u.wk!=='sling'?2:0;
     for(let j=0;j<n;j++){const f=al[j],file=j%d.f,rank=Math.floor(j/d.f),rowN=rank===d.r-1?n-rank*d.f:d.f;
       const ox=((file-(rowN-1)/2)*L.sx+f.jx*jit)*spread,oz=(((d.r-1)/2-rank)*L.sz+f.jz*jit)*spread;
-      let tx=u.x+lx*ox+fx*oz,tz=u.z+lz*ox+fz*oz;
-      if(fight&&rank===0){const k=Math.sin(t*6.5+f.ph)*.3+.3;tx+=fx*k;tz+=fz*k;}
-      const dx=tx-f.x,dz=tz-f.z,dist=Math.hypot(dx,dz);
-      if(dist>maxS){f.x+=dx/dist*maxS;f.z+=dz/dist*maxS;}else{f.x=tx;f.z=tz;}
-      const mv=dist>.12&&vdt>0&&!snap;
-      f.yaw=snap?u.face:f.yaw+angDiff(f.yaw,mv&&dist>1.2&&!fight?Math.atan2(dx,dz):u.face)*Math.min(1,vdt*8);
-      f.bob=mv?Math.abs(Math.sin(t*(cav?11:9)+f.ph))*(cav?.18:.1):0;}
+      let tx=u.x+lx*ox+fx*oz,tz=u.z+lz*ox+fz*oz,face=u.face,e=null;f.tx=tx;f.tz=tz;
+      if(rank<duel){ // the front rank squares off against a man of the enemy line; spearmen strike from the second rank too
+        e=f.foe;if(!e||!e.alive||!u.contacts.includes(e.u)||(e.x-f.x)**2+(e.z-f.z)**2>49)e=f.foe=findFoe(u,f);
+        if(e){const ex=e.x-f.x,ez=e.z-f.z,l=Math.hypot(ex,ez)||1,D=(reach+REACH(e.u))/2;face=Math.atan2(ex,ez);
+          if(rank===0){const sx=(e.tx??e.x)-tx,sz=(e.tz??e.z)-tz,sl=Math.hypot(sx,sz)||1,k=clamp((sl-D)/2,0,1.8);tx+=sx/sl*k;tz+=sz/sl*k;} // both step in to meet halfway
+          if(!snap&&(f.cd-=vdt)<=0&&f.sw<0&&f.wait<=0&&l<D+(rank?2.8:1.4)){swing(f,u);f.cd=rnd(.5,1.9)*(u.state==='waver'?1.7:1);}}
+      }else f.foe=null;
+      let ms=maxS;if(f.kv>.05){f.x+=f.kx*f.kv*vdt;f.z+=f.kz*f.kv*vdt;f.kv*=Math.exp(-vdt*4);ms*=.08;} // shoved back by a charge or a blow
+      const dx=tx-f.x,dz=tz-f.z,dist=Math.hypot(dx,dz),x0=f.x,z0=f.z;
+      if(dist>ms&&dist>1e-6){f.x+=dx/dist*ms;f.z+=dz/dist*ms;}else{f.x=tx;f.z=tz;}
+      f.yaw=snap?u.face:f.yaw+angDiff(f.yaw,!e&&dist>1.2&&!fight?Math.atan2(dx,dz):face)*Math.min(1,vdt*8);
+      if(!snap&&vdt>0){const st=Math.hypot(f.x-x0,f.z-z0);f.wp+=st/stride*6.283;f.wa+=(clamp(st/vdt/gait,0,1.2)-f.wa)*Math.min(1,vdt*6);}
+      f.g+=(guard-f.g)*Math.min(1,vdt*5);}
+    if(!snap&&n&&u.spd>1&&(bg||u.running||rt)&&(u.dustT=(u.dustT||0)-vdt)<=0){ // hooves and running feet kick up dust
+      u.dustT=u.running||rt?(bg?.06:.14):.22;const f=al[Math.floor(Math.random()*n)];fxDust(f.x,f.z,bg);}
   }
-  for(const u of B.units){const bg=big(u);
-    for(const f of u.figs){let sc=f.fled?0:1,tilt=0,roll=0;
-      if(!f.alive&&!f.fled){f.fall=Math.min(1,f.fall+vdt*2.2);if(bg)roll=f.fall*1.45;else tilt=-f.fall*1.5;}
-      f.y=heightAt(f.x,f.z)+(f.alive?f.bob:-f.fall*.12);
+  for(const u of B.units){const bg=big(u),cav=isCav(u),wk=u.wk,rest=(u.contacts.length&&u.state!=='rout'?READY:RELAX)[wk],free=wk!=='spear'&&wk!=='lance'&&wk!=='tusk';
+    for(const f of u.figs){let sc=f.fled?0:f.sc,tilt=0,roll=0,ap=rest,push=0,ay=0,sp=.1,sy=0,nk=0,lean=0,wa=f.wa;
+      if(f.alive){
+        if(f.wait>0&&(f.wait-=vdt)<=0)f.sw=0;
+        if(f.sw>=0){const p0=f.sw,h=HIT[f.swk];f.sw+=vdt/SWING[f.swk];if(h&&p0<h&&f.sw>=h)blow(f);if(f.sw>=1)f.sw=-1;}
+        if(f.sw>=0){const P=poseAt(f.swk,f.sw);ap=P[0];push=P[1];ay=P[2];lean=P[3];
+          if(f.swk==='tusk')nk=f.sw<.4?-.7*sstep(0,.4,f.sw):f.sw<.6?-.7+1.2*sstep(.4,.6,f.sw):.5*(1-sstep(.6,1,f.sw));}
+        else if(free)ap-=Math.sin(f.wp)*.35*wa; // arms swing with the stride
+        const g=f.g;sp=g<=1?.1+.2*g:.3+1.05*(g-1);sy=g<=1?0:.34*(g-1);if(g<.1&&free)sp+=Math.sin(f.wp)*.3*wa; // shield: carried, guarding, or raised against missiles
+        if(wk==='bow'){const dr=f.sw>=0&&f.swk==='bow';sp=dr?ap+.15:.15+Math.sin(f.wp)*.3*wa;sy=0;if(dr){ap+=.25;sp+=.25;}}
+        if(f.hit>0){lean-=f.hit*.9;f.hit-=vdt;}
+        if(cav)nk+=Math.sin(f.wp*2)*.12*wa+Math.sin(t*.8+f.ph)*.04;else if(u.kind==='eleph')nk+=Math.sin(t*.9+f.ph)*.15;
+        tilt=bg?lean*.35+(cav?Math.sin(f.wp)*.07*wa:0):lean;
+        f.y=heightAt(f.x,f.z)+Math.abs(Math.sin(f.wp))*(cav?.2:bg?.1:.07)*wa;
+      }else if(!f.fled){ // falling: back, forward, sideways, or through the air when a charge hits
+        if(f.air){f.vy-=22*vdt;f.ay+=f.vy*vdt;if(f.ay<=0&&f.vy<0){f.ay=0;f.air=false;f.vy=0;}}
+        if(f.vx||f.vz){f.x+=f.vx*vdt;f.z+=f.vz*vdt;if(!f.air){const k=Math.exp(-vdt*7);f.vx*=k;f.vz*=k;if(Math.abs(f.vx)+Math.abs(f.vz)<.05)f.vx=f.vz=0;}}
+        f.fall=Math.min(1,f.fall+vdt*(f.die==='thrown'?1.6:2.2));const e2=f.fall*f.fall;
+        if(bg)roll=e2*1.45*f.roll;
+        else if(f.die==='fwd'){tilt=e2*1.45;ap=rest+1.3*f.fall;sp=.1+1.2*f.fall;}
+        else if(f.die==='side'){roll=e2*1.4*f.roll;tilt=-e2*.25;ap=rest+.9*f.fall;sp=.1+.8*f.fall;}
+        else{tilt=-e2*1.5;ap=rest+2.4*f.fall;sp=.1+2*f.fall;}
+        wa=.45*f.fall;f.y=heightAt(f.x,f.z)+f.ay-e2*.12;
+      }
       _e.set(tilt,f.yaw,roll,'YXZ');_q.setFromEuler(_e);_p.set(f.x,f.y,f.z);_s.setScalar(sc);_M.compose(_p,_q,_s);
-      const fm=R3.fm[f.key];fm.team.setMatrixAt(f.mi,_M);fm.neu.setMatrixAt(f.mi,_M);}}
-  for(const k in R3.fm){R3.fm[k].team.instanceMatrix.needsUpdate=true;R3.fm[k].neu.instanceMatrix.needsUpdate=true;}
+      const fm=R3.fm[f.key],o=f.mi*4,A=fm.aA.array,Bv=fm.aB.array;fm.team.setMatrixAt(f.mi,_M);fm.neu.setMatrixAt(f.mi,_M);
+      A[o]=f.wp;A[o+1]=wa;A[o+2]=ap;A[o+3]=push;Bv[o]=ay;Bv[o+1]=sp;Bv[o+2]=sy;Bv[o+3]=nk;}}
+  for(const k in R3.fm){const fm=R3.fm[k];fm.team.instanceMatrix.needsUpdate=fm.neu.instanceMatrix.needsUpdate=fm.aA.needsUpdate=fm.aB.needsUpdate=true;}
+  if(!snap){fxUpd(R3.dust,vdt);fxUpd(R3.bits,vdt);}
 }
 function updRibbons(){
   let k=0;const put=(cx,cz,face,a,b,w,col,op)=>{if(k<R3.rib.length)setRibbon(R3.rib[k++],cx,cz,face,a,b,w,col,op);};
@@ -1736,6 +1887,7 @@ function camUpdate(dt){
   const pitch=pitchOf(cam.d),ty=heightAt(cam.tx,cam.tz),c=R3.cam;
   c.position.set(cam.tx+Math.sin(cam.yaw)*Math.cos(pitch)*cam.d,ty+Math.sin(pitch)*cam.d,cam.tz+Math.cos(cam.yaw)*Math.cos(pitch)*cam.d);
   const gh=heightAt(c.position.x,c.position.z)+3;if(c.position.y<gh)c.position.y=gh;
+  if(R3.shake>.02){const s=R3.shake*cam.d*.025;c.position.x+=(Math.random()-.5)*s;c.position.y+=(Math.random()-.5)*s;c.position.z+=(Math.random()-.5)*s;R3.shake*=Math.exp(-dt*7);} // charges jolt the view
   c.lookAt(cam.tx,ty,cam.tz);
   const sun=R3.sun,sz=Math.round(clamp(cam.d*.9,45,170)/5)*5;
   sun.position.set(cam.tx-60,ty+120,cam.tz+50);sun.target.position.set(cam.tx,ty,cam.tz);
@@ -1889,7 +2041,7 @@ function startBattle(o,done){
 }
 function frame(now){
   if(!B||!R3.scene)return;R3.raf=requestAnimationFrame(frame);
-  const dt=Math.min(.05,(now-R3.last)/1000);R3.last=now;let vdt=dt;
+  const dt=clamp((now-R3.last)/1000,0,.05);R3.last=now;let vdt=dt; // a frame stamped before the last one must not run time backwards
   if(B.phase==='battle'&&!B.over&&!B.headless){
     B.acc+=dt*B.speed;let n=0;while(B.acc>=SIM_DT&&n<12&&!B.over){simStep(SIM_DT);B.acc-=SIM_DT;n++;}if(n>=12)B.acc=0;vdt=dt*B.speed;}
   else if(B.headless)vdt=dt*4;
@@ -2576,9 +2728,18 @@ for(const ev of['click','touchend','keydown'])document.addEventListener(ev,()=>A
 document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('button');if(b&&!b.disabled&&b.id!=='tapGate')AU.ui('tap');},true);
 document.querySelectorAll('.snd').forEach(b=>b.onclick=()=>{const m=AU.cycle();sndUI();toast(['Music and effects on','Effects only','Sound off'][m]);});
 window.addEventListener('pagehide',()=>{if(G&&!B)save();});
+// local dev only: launch a sample battle with testBattle() from the console
+if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))window.imp={get B(){return B;},cam,camT,R3,beginBattle,adv(s){const sp=B.speed;B.speed=1;for(let i=0;i<s/.05&&B&&R3.scene;i++){cancelAnimationFrame(R3.raf);R3.last=performance.now()-50;frame(performance.now());}if(B)B.speed=sp;}},window.testBattle=(p,e,eFid='gauls',walls=0)=>{
+  let id=9e5;const mk=t=>({uid:id++,type:t,men:UNITS[t].men,xp:0});
+  p=p||['general','rm_hastati','rm_principes','rm_triarii','rm_velites','rm_equites','rm_legion'];
+  e=e||['ga_war','ga_war','ga_chosen','ga_spear','ga_skirm','ga_cav','ga_noble'];
+  $('#title')&&$('#title').classList.add('hidden');
+  return runBattle({title:'Test Battle',playerIsAttacker:true,pUnits:p.map(mk),eUnits:e.map(mk),eFid,walls});
+};
 initTitle();
 })();
 </script>
-<script>if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
+<script>if('serviceWorker' in navigator){if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())); // local testing always loads fresh files
+else window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));}</script>
 </body>
 </html>
