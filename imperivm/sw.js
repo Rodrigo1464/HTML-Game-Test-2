@@ -1,5 +1,5 @@
 // Imperivm offline cache. Bump VERSION whenever you upload a new index.html.
-const VERSION='imperivm-v11';
+const VERSION='imperivm-v12';
 const CORE=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 const FONT_CSS='https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap';
 const THREE_JS='https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js';

@@ -337,7 +337,8 @@ function hexRgb(h){const n=parseInt(h.slice(1),16);return[n>>16&255,n>>8&255,n&2
 const AU=(()=>{
   const KEY='imperivm-sound';
   let mode=0;try{mode=clamp(parseInt(localStorage.getItem(KEY),10)||0,0,2);}catch(e){} // 0 music+effects, 1 effects only, 2 muted
-  let ctx=null,out,musBus,fxBus,verbIn,noiseBuf,want=null,cur=null,amb=null,off=false,t0=0;
+  let ctx=null,out,musBus,fxBus,verbIn,noiseBuf,mon,monBuf,want=null,cur=null,amb=null,ambOn=false,off=false,t0=0;
+  let ticking=false,tried=0,dead=false,lastT=0,stallAt=0,monAt=0; // health watch: see init() and tick()
   const bs={phase:'deploy',tg:.3,lv:.3},last={};
   const mf=n=>440*Math.pow(2,(n-69)/12);
   const now=()=>ctx.currentTime+t0;
@@ -345,20 +346,32 @@ const AU=(()=>{
   const lim=(k,gap)=>{const n=ctx.currentTime;if((last[k]||-9)>n-gap)return false;last[k]=n;return true;};
 
   function init(ext){
-    if(ctx){if(!ext&&!off&&ctx.state!=='running'&&!document.hidden)ctx.resume().catch(()=>{});return true;}
+    if(ctx){
+      // iPhone: after the app has been in the background the context can stay "interrupted", ignore resume(), or claim to be
+      // running with its clock stopped. If a resume hasn't taken (or tick() found it dead), build a fresh one from this tap.
+      if(!ext&&!off&&!document.hidden){if(dead||(ctx.state!=='running'&&tried&&performance.now()-tried>400))revive();else if(ctx.state!=='running')wake();}
+      return true;
+    }
     const AC=window.AudioContext||window.webkitAudioContext;
     try{ctx=ext||new AC();}catch(e){ctx=null;return false;}
     try{if(navigator.audioSession)navigator.audioSession.type='playback';}catch(e){}
     const comp=ctx.createDynamicsCompressor();comp.threshold.value=-16;comp.knee.value=20;comp.ratio.value=5;comp.attack.value=.004;comp.release.value=.3;
-    out=ctx.createGain();out.gain.value=.9;out.connect(comp);comp.connect(ctx.destination);
+    mon=ctx.createAnalyser();mon.fftSize=256;monBuf=new Float32Array(256); // taps the final mix so tick() can spot NaN
+    out=ctx.createGain();out.gain.value=.9;out.connect(comp);comp.connect(mon);mon.connect(ctx.destination);
     musBus=ctx.createGain();fxBus=ctx.createGain();musBus.connect(out);fxBus.connect(out);
     const sr=ctx.sampleRate,len=Math.floor(sr*2.4),ir=ctx.createBuffer(2,len,sr); // a synthetic hall for the reverb
     for(let c=0;c<2;c++){const d=ir.getChannelData(c);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.6);}
     const cv=ctx.createConvolver();cv.buffer=ir;verbIn=ctx.createGain();const vo=ctx.createGain();vo.gain.value=.55;verbIn.connect(cv);cv.connect(vo);vo.connect(out);
     const nl=Math.floor(sr*3);noiseBuf=ctx.createBuffer(1,nl,sr);const nd=noiseBuf.getChannelData(0);for(let i=0;i<nl;i++)nd[i]=Math.random()*2-1;
     applyMode(true);
-    if(!ext){setInterval(tick,40);if(want)music(want.name,want.o);}
+    if(!ext){if(!ticking){ticking=true;setInterval(tick,40);}if(want)music(want.name,{...want.o,delay:0});}
     return true;
+  }
+  function wake(){if(!tried)tried=performance.now();ctx.resume().catch(()=>{});}
+  function revive(){ // throw the stuck context away and rebuild the graph; the current piece starts again from the top
+    const old=ctx;ctx=null;cur=null;amb=null;dead=false;tried=0;stallAt=0;for(const k in last)delete last[k];
+    try{old.close().catch(()=>{});}catch(e){}
+    if(init()&&ambOn)ambient(true);
   }
   function applyMode(imm){
     if(!ctx)return;const t=ctx.currentTime;
@@ -476,7 +489,13 @@ const AU=(()=>{
     cur={name,T:TRACKS[name],tb,i:0,next:t+dl+.08,st:{}};
   }
   function tick(){
-    if(!ctx||ctx.state!=='running'||!cur)return;
+    if(!ctx||off)return;
+    if(ctx.state==='running'&&!document.hidden){ // "running" isn't proof: the clock must move and the mix must not be NaN
+      const n=performance.now(),ct=ctx.currentTime;tried=0;
+      if(!stallAt||ct!==lastT){lastT=ct;stallAt=n;}else if(n-stallAt>1500)dead=true;
+      if(n-monAt>1000&&mon.getFloatTimeDomainData){monAt=n;mon.getFloatTimeDomainData(monBuf);for(const v of monBuf)if(v!==v){dead=true;break;}}
+    }else stallAt=0;
+    if(ctx.state!=='running'||!cur)return;
     if(mode!==0){cur.next=Math.max(cur.next,ctx.currentTime+.05);return;} // music off: hold the place
     if(cur.next<ctx.currentTime-.3)cur.next=ctx.currentTime+.05;
     try{while(cur.next<ctx.currentTime+.35){cur.T.step(cur,cur.i,cur.next);cur.next+=cur.T.sd;cur.i++;}}
@@ -497,7 +516,7 @@ const AU=(()=>{
     }
   }
   function ambient(on){
-    if(!ctx)return;const t=ctx.currentTime;
+    ambOn=on;if(!ctx)return;const t=ctx.currentTime;
     if(on&&!amb){
       const mk=(f,q,type)=>{const s=ctx.createBufferSource();s.buffer=noiseBuf;s.loop=true;const fl=ctx.createBiquadFilter();fl.type=type;fl.frequency.value=f;fl.Q.value=q;const g=ctx.createGain();g.gain.value=0;s.connect(fl);fl.connect(g);g.connect(fxBus);s.start();return{s,g};};
       amb={wind:mk(420,.5,'lowpass'),crowd:mk(700,.45,'bandpass')};crowdL=-1;
@@ -563,7 +582,11 @@ const AU=(()=>{
     mode:()=>mode,
     cycle(){mode=(mode+1)%3;try{localStorage.setItem(KEY,String(mode));}catch(e){}applyMode();return mode;}};
   for(const k in X)api[k]=(...a)=>{if(ok())try{X[k](...a);}catch(e){}};
-  document.addEventListener('visibilitychange',()=>{if(!ctx||off)return;if(document.hidden)ctx.suspend().catch(()=>{});else if(mode<2)ctx.resume().catch(()=>{});});
+  document.addEventListener('visibilitychange',()=>{
+    if(!ctx||off)return;const c=ctx,t=c.currentTime;out.gain.cancelScheduledValues(t);
+    if(document.hidden){out.gain.setTargetAtTime(0,t,.02);setTimeout(()=>{if(document.hidden&&ctx===c)c.suspend().catch(()=>{});},100);} // fade, then sleep
+    else{out.gain.setTargetAtTime(.9,t,.05);wake();for(const d of[300,1200])setTimeout(()=>{if(ctx===c&&!document.hidden&&c.state!=='running')c.resume().catch(()=>{});},d);}
+  });
   // debug: render a track (and/or scheduled effects) offline and report levels — no speakers needed
   api._offline=async(name,secs,calls)=>{
     ctx=null;cur=null;amb=null;off=true;const sr=22050;init(new OfflineAudioContext(2,Math.ceil(sr*secs),sr));
