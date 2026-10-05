@@ -2624,6 +2624,40 @@ function hostileDist(f){const d={},q=[];for(const n of NODES)if(G.s[n.id].owner!
   while(q.length){const c=q.shift();for(const m of ADJ[c])if(d[m]===undefined){d[m]=d[c]+1;q.push(m);}}return d;}
 const threat=(s,f)=>ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner!==f&&t.owner!=='rebels').reduce((a,t)=>a+armyPower(t.units),0);
 function desired(s,f,hd){if(G.cap[f]===s.id)return 7;if(hd[s.id]===1)return clamp(3+Math.round(threat(s,f)/300),3,9);return 1;}
+const AI_EDGE=1.4; // an AI attacks only with this much more power than the defenders (scaled by its aggression)
+function aiNeed(s,f,skip,deep=true,pf=.9){ // power a city of f should hold so that no hostile neighbour (other than skip) dares attack it
+  let m=0;for(const id of ADJ[s.id]){const t=G.s[id];if(id===skip||t.owner===f||t.owner==='rebels')continue; // free cities never attack
+    let p=armyPower(t.units);
+    if(t.owner===PLAYER)p*=pf; // pf: how much of the player's army next door we expect to come at us
+    else{if(deep)p=Math.max(p*.4,p-aiNeed(t,t.owner,s.id,false)); // it must keep a garrison against its other neighbours
+      p*=FACTIONS[t.owner].aggr/AI_EDGE;}
+    if(p>m)m=p;}
+  return m/(1+.15*s.bld.walls)*(G.cap[f]===s.id?1.3:1.1);
+}
+function aiGoal(f){ // the enemy city f is massing against; kept for a while so its troops don't wander
+  const mem=G.ai||(G.ai={});let g=mem[f];
+  const fine=id=>{const t=G.s[id];return t.owner!==f&&!(t.owner===PLAYER&&G.turn<4)&&ADJ[id].some(n=>G.s[n].owner===f);};
+  if(!g||!fine(g.t)||G.turn-g.since>=8){let best=null,bs=0;
+    for(const s of ownedBy(f))for(const id of ADJ[s.id]){const t=G.s[id];if(!fine(id))continue;
+      const sc=(2+t.pop/1500+(G.cap[t.owner]===id?2:0)+(t.owner===PLAYER?1:0))/(armyPower(t.units)*(1+.15*t.bld.walls)+150);
+      if(sc>bs){bs=sc;best=id;}}
+    g=mem[f]=best?{t:best,since:G.turn}:null;}
+  if(!g)return null;
+  const stage=ADJ[g.t].map(id=>G.s[id]).filter(s=>s.owner===f).sort((a,b)=>armyPower(b.units)-armyPower(a.units))[0]; // where the army gathers
+  return{t:G.s[g.t],stage};
+}
+function aiFree(s,f,skip){ // ready units the city can spare; the weakest stay behind until the garrison is strong enough
+  const av=s.units.filter(u=>!u.moved).sort((a,b)=>unitPower(a)-unitPower(b)),keep=s.units.filter(u=>u.moved);
+  const need=aiNeed(s,f,skip),minN=G.cap[f]===s.id?2:1;
+  while(av.length&&(keep.length<minN||armyPower(keep)<need))keep.push(av.shift());
+  return av;
+}
+function aiForce(free,req){ // the fewest of the strongest units that reach the power wanted (all of them if they can't)
+  const by=free.slice().sort((a,b)=>unitPower(b)-unitPower(a)),out=[];
+  if(req<=0)return by.slice(-1);
+  for(const u of by){out.push(u);if(armyPower(out)>=req)break;}
+  return out;
+}
 function aiPickUnit(s,f){
   const ros=FACTIONS[f].roster.filter(t=>canRecruit(s,t));if(!ros.length)return null;
   const miss=s.units.filter(u=>UNITS[u.type].kind==='missile').length,cav=s.units.filter(u=>UNITS[u.type].kind==='cav').length;
@@ -2642,33 +2676,47 @@ function aiPickBuilding(s,hd){
 }
 async function aiTurn(f){
   const F=FACTIONS[f];let hd=hostileDist(f),started=0;
+  const gap=s=>aiNeed(s,f)-armyPower(s.units); // > 0: the city is too weak for its neighbours
+  const short=ownedBy(f).some(s=>gap(s)>0); // while the frontier is short of men, building waits for spare gold
   for(const s of shuffle(ownedBy(f))){if(s.build||started>=2)continue;const k=aiPickBuilding(s,hd);if(!k)continue;
-    const c=BUILD[k].cost[s.bld[k]];if(G.gold[f]-c<250)continue;G.gold[f]-=c;s.build={k,t:BUILD[k].turns[s.bld[k]]};started++;}
-  for(const s of ownedBy(f).sort((a,b)=>threat(b,f)-threat(a,f))){
+    const c=BUILD[k].cost[s.bld[k]];if(G.gold[f]-c<(short?600:250))continue;G.gold[f]-=c;s.build={k,t:BUILD[k].turns[s.bld[k]]};started++;}
+  for(const s of ownedBy(f).map(s=>[s,gap(s)]).sort((a,b)=>b[1]-a[1]).map(x=>x[0])){ // most endangered first
     const want=desired(s,f,hd);let n=0;
     if(G.cap[f]===s.id&&countGenerals(f)<2&&G.gold[f]>1500&&s.units.length<MAX_UNITS){G.gold[f]-=UNITS.general.cost;s.units.push(mkUnit('general',true));}
-    while(s.units.length<Math.min(want,MAX_UNITS)&&n<(G.cap[f]===s.id?2:1)){const t=aiPickUnit(s,f);if(!t)break;const T=UNITS[t];
+    while(s.units.length<MAX_UNITS&&(s.units.length<want||gap(s)>0)&&n<(G.cap[f]===s.id||gap(s)>0?2:1)){const t=aiPickUnit(s,f);if(!t)break;const T=UNITS[t];
       if(G.gold[f]-T.cost<150||netIncome(f)-T.upk<-20)break;G.gold[f]-=T.cost;s.units.push(mkUnit(t,true));n++;}
   }
+  const goal=aiGoal(f);
   for(const s of shuffle(ownedBy(f))){
-    if(s.owner!==f)continue;const av=s.units.filter(u=>!u.moved);if(!av.length)continue;
-    const keepN=Math.max(0,(G.cap[f]===s.id?2:1)-(s.units.length-av.length));
-    const sorted=av.slice().sort((a,b)=>unitPower(b)-unitPower(a)),force=sorted.slice(0,Math.max(0,sorted.length-keepN));
-    if(!force.length)continue;const ap=armyPower(force);let best=null,bs=0;
+    if(s.owner!==f||!s.units.some(u=>!u.moved))continue;let best=null,bs=0,bestSend=null;
     for(const id of ADJ[s.id]){const t=G.s[id];if(t.owner===f)continue;if(t.owner===PLAYER&&G.turn<4)continue;
-      const dp=t.units.length?armyPower(t.units)*(1+.15*t.bld.walls):0;if(dp>0&&ap<dp*1.3/F.aggr)continue;
-      const sc=(ap+1)/(dp+50)+(t.owner==='rebels'?.4:0)+(t.owner===PLAYER?.3:0)+t.pop/20000;if(sc>bs){bs=sc;best=t;}}
+      const free=aiFree(s,f,id);if(!free.length)continue; // what can leave without exposing this city to anyone but the target
+      const dp=t.units.length?armyPower(t.units)*(1+.15*t.bld.walls):0,needT=aiNeed(t,f,null,true,.45); // bolder against the player: losing a city back to them is part of the game
+      const send=aiForce(free,Math.max(dp*1.8/F.aggr,needT)),ap=armyPower(send); // enough to win cleanly and to hold the city after
+      if(dp>0&&ap<dp*AI_EDGE/F.aggr)continue;
+      const left=dp?ap*(.95-.4*(dp/ap)**2):ap; // roughly what survives the fight (see autoResolve)
+      if(left<needT*.5)continue; // it would only be taken straight back
+      let sc=(ap+1)/(dp+50)+(t.owner==='rebels'?.4:0)+(t.owner===PLAYER?.3:0)+(G.cap[t.owner]===t.id?.25:0)+t.pop/20000+(goal&&goal.t===t?.5:0);
+      if(left<needT*.8)sc*=.35;
+      if(sc>bs){bs=sc;best=t;bestSend=send;}}
     if(!best)continue;
-    const send=best.units.length?force:[force[force.length-1]];
+    const send=bestSend;
     await cmMarchAI(s.id,best.id,f,send);
     s.units=s.units.filter(u=>!send.includes(u));send.forEach(u=>u.moved=true);
     await doBattle({attFid:f,units:send,from:s,to:best});
     if(G.lost)return;
   }
   hd=hostileDist(f);
-  for(const s of ownedBy(f)){const av=s.units.filter(u=>!u.moved);if(av.length<=1||hd[s.id]<=1)continue;
-    const dest=ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner===f&&t.units.length<MAX_UNITS&&hd[t.id]<hd[s.id])[0];if(!dest)continue;
-    const mv=av.slice(1,1+MAX_UNITS-dest.units.length);s.units=s.units.filter(u=>!mv.includes(u));mv.forEach(u=>u.moved=true);dest.units.push(...mv);}
+  const toStage={},st=goal&&goal.stage&&goal.stage.owner===f?goal.stage.id:null; // steps through our own land to the gathering city
+  if(st){toStage[st]=0;const q=[st];while(q.length){const c=q.shift();for(const m of ADJ[c])if(toStage[m]===undefined&&G.s[m].owner===f){toStage[m]=toStage[c]+1;q.push(m);}}}
+  for(const s of shuffle(ownedBy(f))){ // spare troops go to the neighbour that most needs them, then to the gathering army, then toward the front
+    const free=aiFree(s,f);if(!free.length)continue;
+    const nb=ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner===f&&t.units.length<MAX_UNITS);
+    let dest=null,dd=0;for(const t of nb){const g=gap(t);if(g>dd){dd=g;dest=t;}}
+    if(!dest&&toStage[s.id]>0)dest=nb.filter(t=>toStage[t.id]<toStage[s.id])[0];
+    if(!dest&&hd[s.id]>1)dest=nb.filter(t=>hd[t.id]<hd[s.id])[0];if(!dest)continue;
+    const mv=[];for(const u of free.sort((a,b)=>unitPower(b)-unitPower(a))){if(dest.units.length+mv.length>=MAX_UNITS)break;mv.push(u);if(dd>0&&armyPower(mv)>=dd)break;}
+    s.units=s.units.filter(u=>!mv.includes(u));mv.forEach(u=>u.moved=true);dest.units.push(...mv);}
 }
 
 /* ================= TURN PROCESSING ================= */
