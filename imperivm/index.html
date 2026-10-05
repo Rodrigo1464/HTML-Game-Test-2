@@ -190,6 +190,19 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .ftab{width:100%;border-collapse:collapse;font-size:14.5px}
 .ftab td{padding:7px 4px;border-bottom:1px solid var(--line)}
 .ftab .sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.ftab .you{font-size:12px;color:var(--ink-2)}
+.fpick{display:flex;gap:10px;width:100%;text-align:left;padding:10px;border-radius:12px;background:var(--panel-2);border:2px solid transparent;margin-bottom:8px}
+.fpick.on{border-color:var(--gold);box-shadow:inset 0 0 0 999px rgba(201,154,53,.12)}
+.fpick .ff{flex:0 0 auto;width:8px;border-radius:3px}
+.fpick .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.fpick .t{display:flex;align-items:center;gap:8px;font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.03em}
+.fpick .dif{margin-left:auto;font-family:var(--serif);font-size:12.5px;font-weight:600;letter-spacing:0}
+.dif.easy{color:var(--good)} .dif.normal{color:var(--warn)} .dif.hard{color:var(--bad)}
+.fpick .d{font-size:13.5px;line-height:1.35;color:var(--ink-2)}
+.fpick .ic{display:flex;flex-wrap:wrap;align-items:center;gap:3px;font-size:12.5px;color:var(--ink-2)}
+.fpick .ic span{margin-left:4px}
+.mcard.picker .mbtns{position:sticky;bottom:-18px;flex-direction:row-reverse;margin:6px -18px -18px;padding:12px 18px 18px;background:var(--panel);border-top:1px solid var(--line)}
+.mcard.picker .mbtns .btn:first-child{flex:1}
 #toast{position:absolute;left:50%;top:76px;transform:translate(-50%,-10px);opacity:0;transition:.2s;z-index:60;background:rgba(26,18,11,.94);color:var(--hud-ink);padding:10px 16px;border-radius:999px;font-size:15px;max-width:90%;text-align:center;pointer-events:none;border:1px solid var(--hud-line)}
 #toast.on{opacity:1;transform:translate(-50%,0)}
 
@@ -252,7 +265,7 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
     <svg id="laurel" width="150" height="96" viewBox="-75 -60 150 96" aria-hidden="true"></svg>
     <h1>IMPERIVM</h1>
     <div class="t-sub">THE CONQUEST OF ITALY</div>
-    <p>Rome holds two cities. Grow them, raise legions, and take the peninsula city by city — on the map and on the battlefield.</p>
+    <p>Six powers fight over Italy. Lead one of them, grow its cities, raise armies, and take the peninsula city by city — on the map and on the battlefield.</p>
     <div class="t-btns" id="titleBtns"></div>
     <button class="snd t-snd" aria-label="Sound"></button>
     <button id="tapGate" aria-label="Tap to begin"><span>TAP TO BEGIN</span></button>
@@ -260,7 +273,7 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 
   <section id="campaign" class="screen hidden">
     <header id="topbar">
-      <div class="emblem">SPQR</div>
+      <div class="emblem" id="tbEmblem">SPQR</div>
       <div><div class="tb-date" id="tbDate"></div><div class="tb-sub" id="tbSub"></div></div>
       <div class="tb-gold"><span id="tbGold"></span><small id="tbInc"></small></div>
       <button class="icon-btn snd" aria-label="Sound"></button>
@@ -631,18 +644,59 @@ U('rb_sling','Slingers','SLG','sling',{},180,25,'barracks',0);
 U('rb_merc','Mamertine Swords','MER','minf',{},300,40,'barracks',0);
 
 /* ================= FACTIONS ================= */
-const PLAYER='rome';
+let PLAYER='rome',AI_ORDER=[]; // set by setPlayer() from the save
 const FACTIONS={
-  rome:{name:'Rome',adj:'Roman',color:'#b0281f',capital:'roma',aggr:1,prefix:'rm_'},
+  rome:{name:'Rome',adj:'Roman',color:'#b0281f',capital:'roma',aggr:1,prefix:'rm_',sg:1},
   etruria:{name:'Etruscan League',adj:'Etruscan',color:'#d98a2b',capital:'tarquinii',aggr:.9,prefix:'et_'},
   samnium:{name:'Samnites',adj:'Samnite',color:'#5f8a2e',capital:'corfinium',aggr:1.05,prefix:'sm_'},
   gauls:{name:'Gauls',adj:'Gallic',color:'#2d6bb0',capital:'mediolanum',aggr:1.15,prefix:'ga_'},
   greeks:{name:'Greek Cities',adj:'Greek',color:'#7b52b5',capital:'tarentum',aggr:.85,prefix:'gr_'},
-  carthage:{name:'Carthage',adj:'Carthaginian',color:'#1f8f8a',capital:'carthago',aggr:1,prefix:'ca_'},
+  carthage:{name:'Carthage',adj:'Carthaginian',color:'#1f8f8a',capital:'carthago',aggr:1,prefix:'ca_',sg:1},
   rebels:{name:'Free Peoples',adj:'Independent',color:'#7d776c',capital:null,aggr:0,prefix:'rb_'}
 };
 for(const f in FACTIONS) FACTIONS[f].roster=Object.keys(UNITS).filter(id=>id.startsWith(FACTIONS[f].prefix));
-const AI_ORDER=['etruria','samnium','gauls','greeks','carthage'];
+const theF=(f,cap)=>FACTIONS[f].sg?FACTIONS[f].name:(cap?'The ':'the ')+FACTIONS[f].name; // "Rome", "the Gauls"
+// Factions the player can lead, in turn order. Whoever the player doesn't pick is run by the AI.
+const PLAYABLE={
+  rome:{emblem:'SPQR',diff:'Normal',
+    blurb:'Two strong cities in the heart of Italy, boxed in by Etruscans and Samnites. Legions come with bigger barracks.',
+    intro:'The Senate has given you command of Rome\'s armies. Rome holds <b>Roma</b> and <b>Capua</b>, with the Etruscan League to the north, the Samnites in the hills to the east and the Greek cities to the south.',
+    hint:'Asculum and Paestum are lightly defended — a good first target.',
+    fallT:'Rome has fallen',fall:'The last Roman city is lost. The Republic is no more.',
+    triumph:'The Senate grants you a triumph through the streets of Roma — Italy is yours.'},
+  etruria:{emblem:'RASNA',diff:'Normal',
+    blurb:'Three old cities of the north-west, caught between Rome and the Gauls. Hoplites, archers and good horse.',
+    intro:'The cities of the League have chosen you to lead them. Etruria holds <b>Tarquinii</b>, <b>Clusium</b> and <b>Pisae</b>, with Rome on the border to the south and the Gauls beyond the Apennines.',
+    hint:'The free towns of Genua and Ariminum have small garrisons — a good first target.',
+    fallT:'Etruria has fallen',fall:'The last Etruscan city is lost. The League is no more.',
+    triumph:'The League crowns you in Tarquinii — Etruria rules Italy as it did in the days of the kings.'},
+  samnium:{emblem:'SAFIN',diff:'Hard',
+    blurb:'Poor mountain tribes between Rome and the Greek south. Fierce swordsmen and javelins, but no spearmen.',
+    intro:'The Samnite tribes have made you their war leader. Samnium holds <b>Corfinium</b>, <b>Beneventum</b> and <b>Luceria</b> in the Apennines, with Rome to the west and the rich Greek cities to the south.',
+    hint:'The free towns of Asculum and Brundisium are lightly defended — a good first target.',
+    fallT:'Samnium has fallen',fall:'The last Samnite town is lost. The tribes scatter into the mountains.',
+    triumph:'The tribes gather at Corfinium to hail you — Rome\'s old enemy now rules Italy.'},
+  gauls:{emblem:'GALLI',diff:'Normal',
+    blurb:'Warbands of the Po valley, ringed by weak free towns. Hard-hitting but brittle infantry, strong noble horse.',
+    intro:'The tribes of Cisalpine Gaul follow you. The Gauls hold <b>Mediolanum</b>, <b>Bononia</b> and <b>Taurini</b> in the Po valley, with free towns all around and the Etruscan League to the south.',
+    hint:'Genua, Patavium and Ariminum are free towns with small garrisons — easy pickings.',
+    fallT:'The Gauls are broken',fall:'The last Gallic stronghold has fallen. The tribes melt back into the Alps.',
+    triumph:'A century after the Gauls burned Rome, all Italy bows to you.'},
+  greeks:{emblem:'HELLAS',diff:'Normal',
+    blurb:'Five rich cities spread across the south and Sicily. Hoplites and Cretan archers, but enemies on every side.',
+    intro:'The Greek cities of the south have made you their general. You hold <b>Tarentum</b>, <b>Syracusae</b>, <b>Croton</b>, <b>Rhegium</b> and <b>Paestum</b> — rich, but spread thin, with Carthage on Sicily and the Samnites and Romans to the north.',
+    hint:'Free Brundisium, next to Tarentum, is lightly held — a good first target.',
+    fallT:'Magna Graecia has fallen',fall:'The last Greek city is lost. Magna Graecia is no more.',
+    triumph:'The assembly at Tarentum hails you — from the Alps to Sicily, Italy is Greek.'},
+  carthage:{emblem:'QART',diff:'Easy',
+    blurb:'The richest power, safe in Africa across the sea and holding western Sicily. Slingers, Numidian horse, elephants.',
+    intro:'The Council of Carthage has given you its armies. Carthage holds <b>Carthago</b> in Africa and <b>Lilybaeum</b>, <b>Panormus</b> and <b>Akragas</b> on Sicily. The Greeks hold the rest of the island, and Italy lies beyond the straits.',
+    hint:'Free Messana guards the straits to Italy, and Syracusae is the great prize on Sicily.',
+    fallT:'Carthage has fallen',fall:'The last Punic city is lost. Carthage is no more.',
+    triumph:'The Council hails you in Carthago — Italy is a Punic province now.'}
+};
+function setPlayer(f){PLAYER=PLAYABLE[f]?f:'rome';AI_ORDER=Object.keys(PLAYABLE).filter(x=>x!==PLAYER);}
+setPlayer('rome');
 
 /* ================= MAP DATA ================= */
 const MS=95, MW=890, MH=990;
@@ -710,9 +764,11 @@ const TAX_MUL=[0.75,1,1.25,1.5], TAX_ORDER=[10,0,-12,-25], TAX_GROW=[0.4,0,-0.4,
 let G=null;
 const SAVE_KEY='imperivm.save.v1';
 function mkUnit(type,moved){return{uid:G.seq++,type,men:UNITS[type].men,xp:0,moved:!!moved};}
-function newGame(){
-  G={v:1,turn:1,seq:1,gold:{},cap:{},s:{},reports:[],last:[],won:false,lost:false};
-  for(const f in FACTIONS){G.gold[f]=f===PLAYER?1600:f==='carthage'?1600:1200;G.cap[f]=FACTIONS[f].capital;}
+function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);} // saves from before faction choice were always Rome
+function newGame(fid){
+  setPlayer(fid);
+  G={v:1,player:PLAYER,turn:1,seq:1,gold:{},cap:{},s:{},reports:[],last:[],won:false,lost:false};
+  for(const f in FACTIONS){G.gold[f]=f===PLAYER||f==='carthage'?1600:1200;G.cap[f]=FACTIONS[f].capital;}
   for(const [id,,, ,owner,pop,bld,units] of SDEF){
     G.s[id]={id,owner,pop,tax:1,bld:Object.assign({farms:0,market:0,temple:0,barracks:0,stables:0,walls:0},bld),build:null,units:[],unrest:0,rec:0};
     G.s[id].units=units.map(t=>mkUnit(t,false));
@@ -945,7 +1001,7 @@ function renderSheet(){
     if(from.length){h+=`<div class="note" style="margin-top:10px">Attack from a neighbouring city:</div>`+from.map(t=>{const av=t.units.filter(u=>!u.moved);
       return`<div class="row"><div class="ico">⚔️</div><div class="main"><div class="t">${sname(t)}</div><div class="d">${av.length} ready units · ${fmt(sumMen(av))} men</div></div><button class="btn primary sm" data-atk="${t.id}">Attack</button></div>`;}).join('');}
     else if(ADJ[s.id].some(id=>G.s[id].owner===PLAYER))h+=`<div class="note" style="margin-top:10px">Your neighbouring armies have already marched this turn.</div>`;
-    else h+=`<div class="note" style="margin-top:10px">Not adjacent to any Roman city yet.</div>`;
+    else h+=`<div class="note" style="margin-top:10px">Not next to any of your cities yet.</div>`;
     h+='</div>';
   }
   const sh=$('#sheet');sh.innerHTML=h;
@@ -993,14 +1049,14 @@ function tabGovern(s){
   let h=`<div class="note">Tax rate</div><div class="seg">${TAX.map((t,i)=>`<button data-tax="${i}" class="${s.tax===i?'on':''}">${t}</button>`).join('')}</div>`;
   h+=`<table class="ledger"><caption>City income per turn</caption><tr><td>Base</td><td>${fmt(ip.base)}</td></tr><tr><td>Taxes (${TAX[s.tax].toLowerCase()})</td><td>${fmt(ip.tax)}</td></tr>${ip.mkt?`<tr><td>Market bonus</td><td>${fmt(ip.mkt)}</td></tr>`:''}${ip.pen?`<tr><td>Unrest penalty</td><td class="neg">${fmt(ip.pen)}</td></tr>`:''}<tr><td>Upkeep of troops here</td><td class="neg">−${fmt(up)}</td></tr><tr class="tot"><td>Net from ${sname(s)}</td><td class="${ip.total-up<0?'neg':'pos'}">${fmt(ip.total-up)}</td></tr></table>`;
   h+=`<table class="ledger"><caption>Public order (below 40% hurts income; below 20% risks revolt)</caption>${orderParts(s).filter(p=>p[1]).map(([k,v])=>`<tr><td>${k}</td><td class="${v<0?'neg':''}">${v>0?'+':''}${v}</td></tr>`).join('')}<tr class="tot"><td>Order</td><td>${order(s)}%</td></tr></table>`;
-  h+=`<table class="ledger"><caption>Treasury of Rome per turn</caption><tr><td>All city income</td><td>${fmt(grossIncome(PLAYER))}</td></tr><tr><td>All army upkeep</td><td class="neg">−${fmt(upkeep(PLAYER))}</td></tr><tr class="tot"><td>Net</td><td class="${netIncome(PLAYER)<0?'neg':'pos'}">${fmt(netIncome(PLAYER))}</td></tr></table>`;
+  h+=`<table class="ledger"><caption>Your treasury per turn</caption><tr><td>All city income</td><td>${fmt(grossIncome(PLAYER))}</td></tr><tr><td>All army upkeep</td><td class="neg">−${fmt(upkeep(PLAYER))}</td></tr><tr class="tot"><td>Net</td><td class="${netIncome(PLAYER)<0?'neg':'pos'}">${fmt(netIncome(PLAYER))}</td></tr></table>`;
   return h;
 }
 function doBuild(s,k){const lv=s.bld[k],c=BUILD[k].cost[lv];if(s.build||lv>=tier(s)||G.gold[PLAYER]<c)return;
   G.gold[PLAYER]-=c;s.build={k,t:BUILD[k].turns[lv]};toast(`Construction started: ${BUILD[k].lv[lv]}`);AU.ui('hammer');save();render();}
 function doRecruit(s,t){const T=UNITS[t];
   if(G.gold[PLAYER]<T.cost)return toast('Not enough gold');if(s.units.length>=MAX_UNITS)return toast('This city holds at most 12 units');
-  if(s.rec>=2)return toast('Each city can train 2 units per turn');if(t==='general'&&countGenerals(PLAYER)>=3)return toast('Rome can field 3 generals at most');
+  if(s.rec>=2)return toast('Each city can train 2 units per turn');if(t==='general'&&countGenerals(PLAYER)>=3)return toast('You can field 3 generals at most');
   G.gold[PLAYER]-=T.cost;s.units.push(mkUnit(t,true));s.rec++;toast(`${T.name} recruited in ${sname(s)}`);AU.ui('recruit');save();render();}
 
 /* ================= MOVEMENT ================= */
@@ -1077,7 +1133,7 @@ async function doBattle(o){
   const lostA=preA-sumMen(attAlive),lostD=preD-sumMen(defAlive);
   if(pInv&&mode==='auto'){
     const won=pAtt?attWon:!attWon;AU.stinger(won?'victory':'defeat');
-    await modal({title:won?'Victory':'Defeat',body:`<p>${won?(pAtt?`Your army has broken the defenders of ${sname(to)}.`:`The garrison of ${sname(to)} holds firm.`):(pAtt?`Your army was thrown back from ${sname(to)}.`:`${sname(to)} has fallen.`)}</p><p>Roman losses: <b>${fmt(pAtt?lostA:lostD)}</b> men<br>Enemy losses: <b>${fmt(pAtt?lostD:lostA)}</b> men</p>`,buttons:[{label:'Continue',value:1,cls:'primary'}]});
+    await modal({title:won?'Victory':'Defeat',body:`<p>${won?(pAtt?`Your army has broken the defenders of ${sname(to)}.`:`The garrison of ${sname(to)} holds firm.`):(pAtt?`Your army was thrown back from ${sname(to)}.`:`${sname(to)} has fallen.`)}</p><p>${FACTIONS[PLAYER].adj} losses: <b>${fmt(pAtt?lostA:lostD)}</b> men<br>Enemy losses: <b>${fmt(pAtt?lostD:lostA)}</b> men</p>`,buttons:[{label:'Continue',value:1,cls:'primary'}]});
   }
   if(attWon){
     to.units=[];
@@ -1107,10 +1163,11 @@ async function capture(to,fid,units,from){
     if(ch==='sack'){G.gold[PLAYER]+=loot;to.pop=Math.round(to.pop*.75);to.unrest=45;}else G.gold[PLAYER]+=occ;
   }else{
     G.gold[fid]+=Math.round(to.pop*.04);
-    if(prev===PLAYER)report('🔥',`The ${FACTIONS[fid].name} captured ${sname(to)}!`);
-    else report('⚑',`The ${FACTIONS[fid].name} took ${sname(to)} from ${prev==='rebels'?'its free people':'the '+FACTIONS[prev].name}.`);
+    if(prev===PLAYER)report('🔥',`${theF(fid,1)} captured ${sname(to)}!`);
+    else report('⚑',`${theF(fid,1)} took ${sname(to)} from ${prev==='rebels'?'its free people':theF(prev)}.`);
   }
-  if(prev!=='rebels'&&prev!==PLAYER&&!ownedBy(prev).length){report('☠️',`The ${FACTIONS[prev].name} have been wiped out${fid===PLAYER?' by Rome':''}.`);if(fid===PLAYER)toast(`The ${FACTIONS[prev].name} are destroyed!`);}
+  if(prev!=='rebels'&&prev!==PLAYER&&!ownedBy(prev).length){const sg=FACTIONS[prev].sg;
+    report('☠️',`${theF(prev,1)} ${sg?'has':'have'} been wiped out${fid===PLAYER?' by your armies':''}.`);if(fid===PLAYER)toast(`${theF(prev,1)} ${sg?'is':'are'} destroyed!`);}
   render();
 }
 
@@ -2084,7 +2141,7 @@ function endBattle(win,reason){
   hud();
   const pw=win===0,why=reason==='time'?(B.defSide===0?'The attackers ran out of time and fell back.':'Time ran out before the defenders broke.'):reason==='withdraw'?'You pulled your army off the field.':(pw?'The enemy army broke and fled.':'Your army broke and fled.');
   setTimeout(async()=>{
-    await modal({title:pw?'Victory':'Defeat',body:`<p>${why}</p><p>Roman losses: <b>${fmt(lost[0])}</b> men${gone[0]?` (${gone[0]} unit${gone[0]>1?'s':''} destroyed)`:''}<br>Enemy losses: <b>${fmt(lost[1])}</b> men${gone[1]?` (${gone[1]} unit${gone[1]>1?'s':''} destroyed)`:''}</p>${pw?'<p>Units that fought gained experience.</p>':''}`,buttons:[{label:'Continue',value:1,cls:'primary'}]});
+    await modal({title:pw?'Victory':'Defeat',body:`<p>${why}</p><p>${FACTIONS[PLAYER].adj} losses: <b>${fmt(lost[0])}</b> men${gone[0]?` (${gone[0]} unit${gone[0]>1?'s':''} destroyed)`:''}<br>Enemy losses: <b>${fmt(lost[1])}</b> men${gone[1]?` (${gone[1]} unit${gone[1]>1?'s':''} destroyed)`:''}</p>${pw?'<p>Units that fought gained experience.</p>':''}`,buttons:[{label:'Continue',value:1,cls:'primary'}]});
     const done=B.done;teardown();B=null;AU.music('campaign',{delay:3,fade:3});done({winnerSide:win});
   },B.headless?50:1200);
 }
@@ -2649,17 +2706,18 @@ function showReports(list,title){
 }
 async function checkEnd(){
   const n=ownedBy(PLAYER).length;
+  const S=PLAYABLE[PLAYER];
   if(!n&&!G.lost){G.lost=true;save();AU.stinger('defeat');
-    await modal({title:'Rome has fallen',body:'<p>The last Roman city is lost. The Republic is no more.</p>',buttons:[{label:'Start a new campaign',value:1,cls:'primary'}]});
-    newCampaign(true);return true;}
+    await modal({title:S.fallT,body:`<p>${S.fall}</p>`,buttons:[{label:'Start a new campaign',value:1,cls:'primary'}]});
+    newCampaign(false);return true;}
   const alive=AI_ORDER.filter(f=>ownedBy(f).length);
   if(!G.won&&(n>=18||!alive.length)){G.won=true;save();AU.stinger('victory');
-    await modal({title:'Triumph',body:`<p>Rome holds ${n} cities. The Senate grants you a triumph through the streets of Roma — Italy is yours.</p><p>You can keep playing to finish off your rivals.</p>`,buttons:[{label:'Continue the campaign',value:1,cls:'gold'}]});return true;}
+    await modal({title:'Triumph',body:`<p>You hold ${n} cities. ${S.triumph}</p><p>You can keep playing to finish off your rivals.</p>`,buttons:[{label:'Continue the campaign',value:1,cls:'gold'}]});return true;}
   return false;
 }
 
 /* ================= MENU / TITLE ================= */
-const HELP=`<p>You lead Rome in 280 BC. <b>Win by holding 18 of the 26 cities.</b></p><ul>
+const help=()=>`<p>You lead ${G?theF(PLAYER):'one of six powers'} in 280 BC. <b>Win by holding 18 of the 26 cities.</b></p><ul>
 <li><b>Cities</b> earn gold from taxes. Build farms to grow, markets for income, temples for order, barracks and stables for better troops, walls for defence.</li>
 <li><b>Public order</b> drops with high taxes, big cities and recent conquest. Below 20% a lightly held city can revolt.</li>
 <li><b>Armies</b> live in cities. Select units in the Army tab and march one city per turn. Marching into an enemy city starts a battle.</li>
@@ -2670,7 +2728,7 @@ const HELP=`<p>You lead Rome in 280 BC. <b>Win by holding 18 of the 26 cities.</
 <li>The game saves after every turn on this device.</li></ul>`;
 function factionsBody(){
   const rows=Object.keys(FACTIONS).map(f=>{const own=ownedBy(f);return[f,own.length,own.reduce((a,s)=>a+s.units.length,0)];}).filter(r=>r[1]||r[0]===PLAYER);
-  return`<table class="ftab">${rows.map(([f,c,u])=>`<tr><td><span class="sw" style="background:${FACTIONS[f].color}"></span>${FACTIONS[f].name}</td><td>${c} cit${c===1?'y':'ies'}</td><td>${u} units</td></tr>`).join('')}</table>`;
+  return`<table class="ftab">${rows.map(([f,c,u])=>`<tr><td><span class="sw" style="background:${FACTIONS[f].color}"></span>${FACTIONS[f].name}${f===PLAYER?' <span class="you">(you)</span>':''}</td><td>${c} cit${c===1?'y':'ies'}</td><td>${u} units</td></tr>`).join('')}</table>`;
 }
 async function openMenu(){
   if(UI.busy)return;
@@ -2678,12 +2736,12 @@ async function openMenu(){
   if(v==='u'){unitSize=SIZES[(SIZES.indexOf(unitSize)+1)%SIZES.length];try{localStorage.setItem(SIZE_KEY,unitSize);}catch(e){}
     toast('Unit size: '+SIZE_NAME[unitSize]+' — '+{normal:'one figure for every 4 men',large:'one figure for every 2 men',huge:'every man on the field'}[unitSize]);return openMenu();}
   if(v==='d')showReports(G.last||[],'Last dispatches');
-  if(v==='h')modal({title:'How to play',body:HELP,buttons:[{label:'Got it',value:1,cls:'primary'}]});
+  if(v==='h')modal({title:'How to play',body:help(),buttons:[{label:'Got it',value:1,cls:'primary'}]});
   if(v==='n'){const ok=await modal({title:'Start over?',body:'<p>Your current campaign will be erased.</p>',buttons:[{label:'Start a new campaign',value:1,cls:'primary'},{label:'Cancel',value:0}]});if(ok)newCampaign(true);}
 }
 let mapReady=false;
 async function enterCampaign(){
-  $('#title').classList.add('hidden');$('#campaign').classList.remove('hidden');
+  $('#title').classList.add('hidden');$('#campaign').classList.remove('hidden');$('#tbEmblem').textContent=PLAYABLE[PLAYER].emblem;
   if(!mapReady){buildRegions();buildRoads();mapReady=true;}
   if(!CM.ok&&!CM.failed&&webglOK()){ // the 3D map; if it can't load, the flat map still works
     $('#cmLoad').classList.remove('hidden');
@@ -2695,13 +2753,29 @@ async function enterCampaign(){
   $('#busy').classList.toggle('pill',CM.on);document.querySelectorAll('.rot3d').forEach(b=>b.classList.toggle('hidden',!CM.on));
   if(CM.on){cmStart();Object.assign(ct,{d:window.innerWidth<600?520:620,yaw:0});Object.assign(cv,ct);}
   repaintTerritory();if(!CM.on)setZoom(window.innerWidth<600?.82:1.05);render();AU.music('campaign',{fade:2.5});
-  requestAnimationFrame(()=>centerOn(G.cap[PLAYER]||'roma'));
+  requestAnimationFrame(()=>centerOn(G.cap[PLAYER]||(ownedBy(PLAYER)[0]||{}).id||FACTIONS[PLAYER].capital));
   if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>{if(!CM.on)drawMap();});
   setTimeout(()=>loadThree().catch(()=>{}),2500); // warm the cache so battles work offline later
 }
-async function newCampaign(skipTitle){
-  newGame();save();UI.sel=null;UI.move=null;closeSheet();await enterCampaign();
-  await modal({title:'Summer, 280 BC',body:`<p>The Senate has given you command of Rome's armies. Rome holds <b>Roma</b> and <b>Capua</b>; Etruscans, Samnites, Gauls, Greek cities and Carthage hold the rest.</p><p>Asculum and Paestum are lightly defended — a good first target. Tap a city to see its army, buildings and recruits.</p>`,buttons:[{label:'Begin',value:1,cls:'primary'},{label:'How to play',value:'h'}]}).then(v=>v==='h'&&modal({title:'How to play',body:HELP,buttons:[{label:'Got it',value:1,cls:'primary'}]}));
+async function pickFaction(canBack){ // resolves to a faction id, or null if the player backs out
+  let sel=PLAYER;
+  const go=f=>'Lead '+theF(f);
+  const card=f=>{const F=FACTIONS[f],S=PLAYABLE[f],n=SDEF.filter(d=>d[4]===f).length;
+    return`<button class="fpick${f===sel?' on':''}" data-f="${f}"><span class="ff" style="background:${F.color}"></span><span class="main">`+
+      `<span class="t">${F.name}<span class="dif ${S.diff.toLowerCase()}">${S.diff}</span></span><span class="d">${S.blurb}</span>`+
+      `<span class="ic">${F.roster.map(t=>symSvg(UNITS[t].kind,F.color,22)).join('')}<span>${n} cities · ${NODE[F.capital].name}</span></span></span></button>`;};
+  const p=modal({title:'Choose your people',body:Object.keys(PLAYABLE).map(card).join(''),
+    buttons:[{label:go(sel),value:'go',cls:'primary'},...(canBack?[{label:'Back',value:null}]:[])]});
+  const mc=$('#mcard'),btn=mc.querySelector('.mbtns [data-i="0"]');mc.classList.add('picker');
+  mc.querySelectorAll('.fpick').forEach(b=>b.onclick=()=>{sel=b.dataset.f;btn.textContent=go(sel);mc.querySelectorAll('.fpick').forEach(x=>x.classList.toggle('on',x===b));});
+  const v=await p;mc.classList.remove('picker');
+  return v==='go'?sel:null;
+}
+async function newCampaign(canBack){
+  const fid=await pickFaction(canBack);if(!fid)return;
+  newGame(fid);save();UI.sel=null;UI.move=null;UI.nextIdx=-1;closeSheet();await enterCampaign();
+  const S=PLAYABLE[PLAYER];
+  await modal({title:'Summer, 280 BC',body:`<p>${S.intro}</p><p>${S.hint} Tap a city to see its army, buildings and recruits.</p>`,buttons:[{label:'Begin',value:1,cls:'primary'},{label:'How to play',value:'h'}]}).then(v=>v==='h'&&modal({title:'How to play',body:help(),buttons:[{label:'Got it',value:1,cls:'primary'}]}));
 }
 function laurel(){
   let h='';for(const side of [-1,1])for(let i=0;i<9;i++){const a=Math.PI*(.62+i*.085),x=side*Math.cos(a)*-52,y=Math.sin(a)*-52+18;
@@ -2714,10 +2788,11 @@ function initTitle(){
   sndUI();
   $('#tapGate').onclick=()=>{AU.unlock();AU.music('menu',{fade:2.5});$('#tapGate').classList.add('off');$('#title').classList.remove('gated');};
   laurel();const has=loadSave();const b=$('#titleBtns');
-  b.innerHTML=(has&&!has.lost?`<button class="btn gold" id="tCont">Continue · turn ${has.turn}</button>`:'')+`<button class="btn ${has&&!has.lost?'ghost':'gold'}" id="tNew">New campaign</button><button class="btn ghost" id="tHelp">How to play</button>`;
-  if($('#tCont'))$('#tCont').onclick=()=>{G=has;enterCampaign();};
-  $('#tNew').onclick=async()=>{if(has&&!has.lost){const ok=await modal({title:'Start over?',body:'<p>This replaces your saved campaign.</p>',buttons:[{label:'Start a new campaign',value:1,cls:'primary'},{label:'Cancel',value:0}]});if(!ok)return;}newCampaign();};
-  $('#tHelp').onclick=()=>modal({title:'How to play',body:HELP,buttons:[{label:'Got it',value:1,cls:'primary'}]});
+  const hasF=has&&PLAYABLE[has.player]?has.player:'rome';
+  b.innerHTML=(has&&!has.lost?`<button class="btn gold" id="tCont">Continue · ${FACTIONS[hasF].name}, turn ${has.turn}</button>`:'')+`<button class="btn ${has&&!has.lost?'ghost':'gold'}" id="tNew">New campaign</button><button class="btn ghost" id="tHelp">How to play</button>`;
+  if($('#tCont'))$('#tCont').onclick=()=>{useGame(has);enterCampaign();};
+  $('#tNew').onclick=async()=>{if(has&&!has.lost){const ok=await modal({title:'Start over?',body:'<p>This replaces your saved campaign.</p>',buttons:[{label:'Start a new campaign',value:1,cls:'primary'},{label:'Cancel',value:0}]});if(!ok)return;}newCampaign(true);};
+  $('#tHelp').onclick=()=>modal({title:'How to play',body:help(),buttons:[{label:'Got it',value:1,cls:'primary'}]});
 }
 
 /* ================= WIRING ================= */
