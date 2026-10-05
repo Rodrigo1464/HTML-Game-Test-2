@@ -1206,9 +1206,12 @@ const LAYOUTS={ // men per figure drawn; denser ranks keep each unit's footprint
 };
 const SIZES=['normal','large','huge'],SIZE_NAME={normal:'Normal',large:'Large',huge:'Huge'},SIZE_KEY='imperivm-unitsize';
 let unitSize='large';try{const v=localStorage.getItem(SIZE_KEY);if(SIZES.includes(v))unitSize=v;}catch(e){}
-const SHIELD={rome:'scutum',samnium:'scutum',etruria:'round',greeks:'round',carthage:'oval',gauls:'oval',rebels:'oval'};
-const HELM={rome:'crest',samnium:'plume',etruria:'corinth',greeks:'corinth',carthage:'cap',gauls:'hair',rebels:'cap'};
-const GATES=[-62,0,62],GATE_W=20;
+const GFXS=['low','medium','high'],GFX_NAME={low:'Low',medium:'Medium',high:'High'},GFX_KEY='imperivm-gfx';
+const GQ={ // pixel ratio cap, shadow map size, grass tufts on the battlefield, ground mesh detail, small kit details on the soldiers
+  low:{pr:1,shadow:0,grass:0,seg:1,det:false},medium:{pr:1.5,shadow:1024,grass:5000,seg:1.2,det:true},high:{pr:2,shadow:2048,grass:12000,seg:1.5,det:true}};
+let gfx=window.matchMedia&&matchMedia('(pointer:coarse)').matches?'medium':'high';try{const v=localStorage.getItem(GFX_KEY);if(GFXS.includes(v))gfx=v;}catch(e){}
+const gfxPR=()=>Math.min(GQ[gfx].pr,window.devicePixelRatio||1);
+const GATES=[-62,0,62],GATE_W=20,AVE_W=20; // the town's three avenues run back from the gates (and sit in the same places when there are no walls)
 const STATE_NAME={ok:'Steady',waver:'Wavering',rout:'Routing',dead:'Destroyed',fled:'Fled'};
 
 let B=null;
@@ -1244,7 +1247,53 @@ function mkTerrain(defSide){
   const R=mulberry32((Math.random()*1e9)|0),hills=[],woods=[];
   for(let i=0,n=2+Math.floor(R()*3);i<n;i++)hills.push({x:(R()*2-1)*(FX-25),z:(R()*2-1)*(WALL_Z-12),r:22+R()*28,h:4+R()*7});
   for(let i=0,n=2+Math.floor(R()*3);i<n;i++)woods.push({x:(R()*2-1)*(FX-18),z:(R()*2-1)*(WALL_Z-28),r:9+R()*12});
-  return{hills,woods,ts:defSide===0?1:-1,s1:R()*6,s2:R()*6,R};
+  return{hills,woods,ts:defSide===0?1:-1,s1:R()*6,s2:R()*6,R,rd:{x0:(R()-.5)*50,a:4+R()*9,f:.018+R()*.016,p:R()*6.28},gn:R()*50};
+}
+function roadX(zl){ // the cart track winds in from the attackers' edge and ends at the town's main gate (zl: distance toward the town)
+  const r=B.ter.rd,t=sstep(-FZ-170,WALL_Z,zl);return r.x0*(1-t)+r.a*Math.sin(zl*r.f+r.p)*(1-sstep(WALL_Z-50,WALL_Z,zl));
+}
+const onRoad=(x,z,w)=>{const zl=z*B.ter.ts;return zl<WALL_Z+2&&Math.abs(x-roadX(zl))<w;};
+/* buildings are solid: one grid cell per world unit across the field, for single men (blk) and for whole formations (blkU, a little wider) */
+function unblock(x,z,grid,esc){ // the nearest open point to (x,z), or null when (x,z) is open already
+  const W=2*FX,i=Math.floor(x+FX),j=Math.floor(z+FZ);if(i<0||j<0||i>=W||j>=2*FZ)return null;
+  const c=j*W+i;if(!grid[c])return null;
+  const e=esc[c],dx=e%W-FX+.5-x,dz=Math.floor(e/W)-FZ+.5-z,l=Math.hypot(dx,dz),k=Math.max(0,l-.45)/(l||1);return[x+dx*k,z+dz*k];
+}
+function escField(blk,W,H){ // breadth-first from the open ground into the buildings: each blocked cell learns its nearest open cell
+  const n=W*H,near=new Int32Array(n).fill(-1),q=new Int32Array(n);let h=0,t=0;
+  for(let c=0;c<n;c++)if(!blk[c]){near[c]=c;q[t++]=c;}
+  while(h<t){const c=q[h++],i=c%W,j=(c-i)/W;
+    if(i+1<W&&near[c+1]<0){near[c+1]=near[c];q[t++]=c+1;}if(i>0&&near[c-1]<0){near[c-1]=near[c];q[t++]=c-1;}
+    if(j+1<H&&near[c+W]<0){near[c+W]=near[c];q[t++]=c+W;}if(j>0&&near[c-W]<0){near[c-W]=near[c];q[t++]=c-W;}}
+  return near;
+}
+function mkBlock(){
+  const W=2*FX,H=2*FZ,ts=B.ter.ts,blk=new Uint8Array(W*H),dil=new Uint8Array(W*H);
+  for(const o of B.town.obs){const za=Math.min(o[2]*ts,o[3]*ts),zb=Math.max(o[2]*ts,o[3]*ts);
+    for(let j=Math.max(0,Math.floor(za+FZ));j<=Math.min(H-1,Math.ceil(zb+FZ)-1);j++)for(let i=Math.max(0,Math.floor(o[0]+FX));i<=Math.min(W-1,Math.ceil(o[1]+FX)-1);i++)blk[j*W+i]=1;}
+  for(let j=0;j<H;j++)for(let i=0;i<W;i++)if(blk[j*W+i])for(let b=Math.max(0,j-1);b<=Math.min(H-1,j+1);b++)for(let a=Math.max(0,i-1);a<=Math.min(W-1,i+1);a++)dil[b*W+a]=1;
+  B.blk=blk;B.esc=escField(blk,W,H);B.blkU=dil;B.escU=escField(dil,W,H);
+}
+function openDest(d){if(d&&B.blkU){const e=unblock(d.x,d.z,B.blkU,B.escU);if(e){d.x=e[0];d.z=e[1];}}return d;}
+function mkTown(){ // the town behind the square: three avenues run back from the gates, blocks of houses between them, and a temple and a colonnade facing the square
+  const R=mulberry32((Math.random()*1e9)|0),ts=B.ter.ts,houses=[],obs=[],cyp=[],skip=B.walls?.07:.3;
+  const temple={x:31,z:TOWN_Z+11.5,w:22,d:19},stoa=B.walls?{x:-31,z:TOWN_Z+4.5,w:38,d:7}:null;
+  const box=(x,z,w,d)=>obs.push([x-w/2,x+w/2,z-d/2,z+d/2]);box(temple.x,temple.z,temple.w,temple.d);if(stoa)box(stoa.x,stoa.z,stoa.w,stoa.d);
+  const free=(x0,x1,z0,z1)=>!obs.some(o=>x0<o[1]+.8&&x1>o[0]-.8&&z0<o[3]+.8&&z1>o[2]-.8);
+  const blocks=[[-FX-34,GATES[0]-AVE_W/2],[GATES[0]+AVE_W/2,GATES[1]-AVE_W/2],[GATES[1]+AVE_W/2,GATES[2]-AVE_W/2],[GATES[2]+AVE_W/2,FX+34]];
+  const PL=[0xe8dcc0,0xdcc69c,0xcfb68c,0xe2d3b4,0xd9c2a0,0xefe5cf],TL=[0xa4553a,0x9a4a32,0xb0613f,0x8f4430,0xb86e48];
+  for(const [bx0,bx1] of blocks)for(let z=TOWN_Z+1.5;z<FZ+40;){
+    const d=6+R()*3.5;if(z>136&&z<146){z=146;continue;} // a cross street
+    for(let x=bx0;x<bx1-3.5;){let w=5.5+R()*4;if(bx1-(x+w)<3.5)w=bx1-x;
+      const x0=x+.6,x1=x+w-.6,z0=z+.6,z1=z+d-.6;x+=w;
+      if(!free(x0,x1,z0,z1))continue;
+      if(R()<skip){if(R()<.5){const cx=(x0+x1)/2,cz=(z0+z1)/2;cyp.push([cx,cz,.8+R()*.5]);obs.push([cx-.7,cx+.7,cz-.7,cz+.7]);}continue;} // a garden with a cypress
+      const st=R()<.16&&z>TOWN_Z+10?3:R()<.45?2:1,h=st===3?7.5+R()*2:st===2?5+R()*1.5:3+R()*1.2,side=Math.abs(x0-.6-bx0)<.01?-1:Math.abs(x1+.6-bx1)<.01?1:0;
+      const ry=z<TOWN_Z+3?(ts===1?Math.PI:0):side?side*Math.PI/2:[0,Math.PI,Math.PI/2,-Math.PI/2][Math.floor(R()*4)]; // front door on the square, else on the avenue
+      houses.push({x0,x1,z0,z1,h,st,ry,wc:PL[Math.floor(R()*PL.length)],rc:TL[Math.floor(R()*TL.length)],gable:R()<.55,rh:st===3?1.2+R()*.6:1.4+R()*1.2});
+      obs.push([x0,x1,z0,z1]);}
+    z+=d;}
+  return{houses,obs,cyp,temple,stoa};
 }
 function heightAt(x,z){
   const T=B.ter;let h=Math.sin(x*.045+T.s1)*Math.cos(z*.038+T.s2)*1.1+Math.sin(x*.11+z*.07)*.35;
@@ -1391,7 +1440,10 @@ function updRout(u,dt){
   u.running=true;
   if(!u.contacts.length&&nearFoe(u)>35){u.mor+=(4+(hasAura(u)?2:0))*dt;
     if(u.mor>=40&&u.men/u.max>=.25&&u.rallies<2){u.rallies++;u.state='waver';u.running=false;u.order='none';u.dest=null;flt(u,'RALLIED','#c4f2b0');sndEv('rally',u);return;}}
-  const ez=u.side===0?FZ:-FZ,wp=wallWaypoint(u,u.x*.98,ez)||[u.x*.98,ez];turnTo(u,Math.atan2(wp[0]-u.x,wp[1]-u.z),dt,4);
+  const ez=u.side===0?FZ:-FZ;let wp=wallWaypoint(u,u.x*.98,ez);
+  if(!wp&&Math.sign(ez)===B.ter.ts&&u.z*B.ter.ts>TOWN_Z-14){ // fleeing into the town: make for the nearest avenue, then run up it
+    const ax=GATES.reduce((b,g)=>Math.abs(u.x-g)<Math.abs(u.x-b)?g:b);wp=Math.abs(u.x-ax)>3&&u.z*B.ter.ts<TOWN_Z+2?[ax,(TOWN_Z-1)*B.ter.ts]:[ax,ez];}
+  wp=wp||[u.x*.98,ez];turnTo(u,Math.atan2(wp[0]-u.x,wp[1]-u.z),dt,4);
   const [fx,fz]=fwdV(u.face),s=runSp(u)*1.05*terrMul(u,u.x,u.z)*dt;u.x+=fx*s;u.z+=fz*s;u.spd=s/dt;
   if(Math.abs(u.z)>=FZ-1){u.state='fled';for(const f of u.alive)f.fled=true;}
 }
@@ -1463,6 +1515,11 @@ function separate(){
     nx/=l;nz/=l;const ea=a.contacts.length>0,eb=b.contacts.length>0,wa=ea&&!eb?0:!ea&&eb?1:.5,p=Math.min(ov,1.2);
     a.x-=nx*p*wa;a.z-=nz*p*wa;b.x+=nx*p*(1-wa);b.z+=nz*p*(1-wa);}
   for(const u of us){u.x=clamp(u.x,-FX+u.dm.hw*.5,FX-u.dm.hw*.5);u.z=clamp(u.z,-FZ+3,FZ-3);}
+  if(B.blkU)for(const u of us){ // formations can't walk into buildings (routers squeeze up the streets man by man instead)
+    const [lx,lz]=latV(u.face),[fx,fz]=fwdV(u.face),d=u.dm;let bx=0,bz=0,bl=0;
+    for(let a=-1;a<=1;a+=.5)for(let b=-1;b<=1;b++){const px=u.x+lx*d.hw*a+fx*d.hd*b,pz=u.z+lz*d.hw*a+fz*d.hd*b,e=unblock(px,pz,B.blkU,B.escU);
+      if(e){const ex=e[0]-px,ez=e[1]-pz,l=ex*ex+ez*ez;if(l>bl){bl=l;bx=ex;bz=ez;}}}
+    if(bl){u.x+=bx;u.z+=bz;}}
 }
 
 /* ================= BATTLE: AI ================= */
@@ -1476,7 +1533,7 @@ function bestTarget(u,foes){
   return best;
 }
 function aiAtk(u,t){if(u.order!=='attack'||u.target!==t){u.order='attack';u.target=t;u.orderT=B.time;}}
-function aiMove(u,x,z,face){u.order='move';u.target=null;u.dest={x:clamp(x,-FX+10,FX-10),z:clamp(z,-FZ+6,FZ-6),face:face??homeFace(u.side)};}
+function aiMove(u,x,z,face){u.order='move';u.target=null;u.dest=openDest({x:clamp(x,-FX+10,FX-10),z:clamp(z,-FZ+6,FZ-6),face:face??homeFace(u.side)});}
 function aiHold(u){if(u.order!=='none'){u.order='none';u.target=null;u.dest={x:u.x,z:u.z,face:homeFace(u.side)};}}
 function aiHome(u){if(Math.hypot(u.home.x-u.x,u.home.z-u.z)>6)aiMove(u,u.home.x,u.home.z);else aiHold(u);}
 function aiThink(s){
@@ -1561,7 +1618,7 @@ function orderMove(sel,pt){ // the group keeps its shape and turns to face the m
   const [l0x,l0z]=latV(phi),[f0x,f0z]=fwdV(phi),[l1x,l1z]=latV(th),[f1x,f1z]=fwdV(th);
   for(const u of sel){const ox=u.x-c.x,oz=u.z-c.z,lx=ox*l0x+oz*l0z,lz=ox*f0x+oz*f0z;
     u.order='move';u.target=null;u.orderT=B.time;u.skirmT=0;
-    u.dest={x:clamp(pt.x+l1x*lx+f1x*lz,-FX+6,FX-6),z:clamp(pt.z+l1z*lx+f1z*lz,-FZ+4,FZ-4),face:th};}
+    u.dest=openDest({x:clamp(pt.x+l1x*lx+f1x*lz,-FX+6,FX-6),z:clamp(pt.z+l1z*lx+f1z*lz,-FZ+4,FZ-4),face:th});}
 }
 function orderAttack(sel,e){AU.ui('attack');for(const u of sel){u.order='attack';u.target=e;u.dest=null;u.orderT=B.time;u.skirmT=0;}}
 function orderHalt(sel){for(const u of sel){u.order='none';u.target=null;u.dest={x:u.x,z:u.z,face:u.face};u.orderT=B.time;}}
@@ -1578,6 +1635,7 @@ let _M,_q,_p,_s,_e,_d,_v,ZERO,ZAX;
 const SKIN=0xc99a6e,BRONZE=0xb38b3a,IRON=0x8c8f94,WOOD=0x6b4a2b,LEATHER=0x5a3f28,HORSE=0x6e4b31,HORSE_D=0x4a3322;
 const bx=(w,h,d)=>new THREE.BoxGeometry(w,h,d),cy=(a,b,h,s)=>new THREE.CylinderGeometry(a,b,h,s),cn=(r,h,s)=>new THREE.ConeGeometry(r,h,s);
 const prt=(geo,color,o={})=>({geo,color,o});
+const pane=(w,h,color,o)=>prt(new THREE.PlaneGeometry(w,h),color,o),disc=(r,n,color,o)=>prt(new THREE.CircleGeometry(r,n),color,o); // flat decals facing +z
 const jt=(j,p)=>(p.o.j=j,p); // hang a part from a joint of the rig (1 weapon arm, 2 shield arm, 3-6 legs, 7 neck/trunk, 10 tail, 11-12 ears, 13 bow)
 function mergeParts(parts,rig){ // bake parts into one flat-shaded, vertex-coloured geometry; with a rig, every vertex also carries its joint's pivot and id
   const T=THREE,m=new T.Matrix4(),q=new T.Quaternion(),e=new T.Euler(),gs=[];let n=0;
@@ -1594,46 +1652,107 @@ function mergeParts(parts,rig){ // bake parts into one flat-shaded, vertex-colou
 const FOOT_RIG={1:[.3,1.34,.05],2:[-.3,1.34,.05],3:[-.11,.8,0],4:[.11,.8,0],13:[-.3,1.34,.05]};
 const CAV_RIG={1:[.3,2.2,0],2:[-.3,2.2,0],3:[-.18,.9,.6],4:[.18,.9,.6],5:[-.18,.9,-.6],6:[.18,.9,-.6],7:[0,1.5,.62],10:[0,1.42,-.78]};
 const ELEPH_RIG={3:[-.6,1.6,1],4:[.6,1.6,1],5:[-.6,1.6,-1],6:[.6,1.6,-1],7:[0,2.55,2.7],11:[-.8,2.9,2.05],12:[.8,2.9,2.05]};
-function headParts(fid,y,neu){
+/* what each unit wears, on top of its faction's defaults: body armour, legs, helmet with plume colour (pl), shield with emblem colour (em), cloak */
+const KIT0={rome:{body:'tunic',legs:'bare',helm:'crest',shield:'scutum'},etruria:{body:'linen',legs:'greaves',helm:'corinth',shield:'round'},
+  samnium:{body:'disc',legs:'greaves',helm:'plume',shield:'scutum'},gauls:{body:'tunic',legs:'trousers',helm:'hair',shield:'oval'},
+  greeks:{body:'linen',legs:'greaves',helm:'corinth',shield:'round'},carthage:{body:'linen',legs:'bare',helm:'cap',shield:'oval'},
+  rebels:{body:'tunic',legs:'boots',helm:'cap',shield:'oval'}};
+const EMB={rome:0xf2c94c,etruria:0x1c1c1c,samnium:0xece6d4,gauls:0xece6d4,greeks:0x1c1c1c,carthage:0xece6d4,rebels:null};
+const KIT={
+  general:{body:'bronze',cloak:1,helm:'crest',pl:0xe0b840},
+  rm_velites:{helm:'wolf',shield:'small'},rm_hastati:{body:'plate',helm:'feathers',pl:0x1c1c1c,legs:'greave1'},
+  rm_principes:{body:'mail',helm:'feathers',pl:0x8c1c14},rm_triarii:{body:'mail',helm:'feathers',pl:0x1c1c1c,legs:'greaves'},
+  rm_legion:{body:'mail',pl:0x8c1c14},rm_equites:{shield:'small'},rm_eqleg:{body:'mail',shield:'small'},
+  et_levy:{body:'tunic',helm:'pilos',legs:'boots'},et_skirm:{body:'tunic',helm:'bare',legs:'boots'},et_hoplite:{body:'bronze',pl:0x2b2b2b},
+  et_archer:{helm:'pilos',legs:'boots'},et_cav:{body:'bronze',helm:'attic',pl:0x2b2b2b},et_noble:{body:'bronze',pl:0xece6d4,cloak:1,em:0xf2c94c},
+  sm_levy:{body:'tunic',helm:'cap',legs:'boots'},sm_jav:{body:'tunic',helm:'bare',legs:'boots'},sm_warrior:{},sm_heavy:{cloak:1,em:0xf2c94c},sm_cav:{},
+  ga_war:{body:'bare'},ga_skirm:{},ga_spear:{},ga_chosen:{body:'mail',helm:'iron'},ga_cav:{},ga_noble:{body:'mail',helm:'iron',cloak:1},
+  gr_pelt:{body:'tunic',helm:'pilos',legs:'boots'},gr_mil:{helm:'pilos',legs:'bare'},gr_hop:{pl:0x8c1c14},gr_arch:{body:'tunic',helm:'bare',legs:'boots'},
+  gr_cav:{body:'bronze',helm:'attic',pl:0xece6d4,shield:'none'},gr_armored:{body:'bronze',pl:0xece6d4,em:0xf2c94c},
+  ca_sling:{body:'tunic',helm:'bare'},ca_libyan:{shield:'round'},ca_iber:{body:'tunic'},ca_numid:{body:'tunic',helm:'bare'},
+  ca_sacred:{body:'bronze',helm:'attic',pl:0xece6d4,shield:'round',cloak:1},
+  rb_mil:{},rb_spear:{shield:'round'},rb_sling:{helm:'bare'},rb_merc:{body:'mail',helm:'crest',pl:0x2b2b2b}
+};
+const MAIL=0x7e8288,LINEN=0xe4dac0,HAIR=0x3b2a1a;
+const HORSE_C={general:0xd9d2c3,ga_noble:0x2e2420,ca_numid:0x8a6440,gr_cav:0x7a7068,et_cav:0x5a3d28,rm_eqleg:0x3e2c1f};
+const kitOf=(fid,type)=>Object.assign({body:'tunic',legs:'bare',helm:'cap',shield:'oval',pl:0x8c1c14,em:EMB[fid],cloak:0},KIT0[fid],KIT[type]);
+const dome=(c,y,r=.17)=>prt(new THREE.SphereGeometry(r,6,3,0,Math.PI*2,0,Math.PI/2),c,{y});
+function headParts(k,y,neu,det){
   neu.push(prt(bx(.24,.26,.24),SKIN,{y}));
-  const h=HELM[fid],dome=()=>new THREE.SphereGeometry(.17,6,4,0,Math.PI*2,0,Math.PI/2);
-  if(h==='crest')neu.push(prt(dome(),BRONZE,{y:y+.06}),prt(bx(.05,.13,.3),0x8c1c14,{y:y+.24}));
-  else if(h==='plume')neu.push(prt(dome(),BRONZE,{y:y+.06}),prt(bx(.04,.32,.04),0xece6d4,{x:-.09,y:y+.3}),prt(bx(.04,.32,.04),0xece6d4,{x:.09,y:y+.3}));
-  else if(h==='corinth')neu.push(prt(bx(.28,.3,.29),BRONZE,{y:y+.03}),prt(bx(.05,.16,.34),0x2b2b2b,{y:y+.25}));
+  const h=k.helm,pl=k.pl;
+  if(h==='crest')neu.push(dome(BRONZE,y+.06),prt(bx(.05,.13,.3),pl,{y:y+.24}));
+  else if(h==='feathers'){neu.push(dome(BRONZE,y+.06),prt(cy(.03,.03,.06,4),BRONZE,{y:y+.25})); // three tall upright feathers
+    for(const s of det?[-1,0,1]:[0])neu.push(prt(bx(.035,.34,.035),pl,{x:s*.06,y:y+.42,rz:-s*.18}));}
+  else if(h==='plume')neu.push(dome(BRONZE,y+.06),prt(bx(.04,.32,.04),0xece6d4,{x:-.09,y:y+.3}),prt(bx(.04,.32,.04),0xece6d4,{x:.09,y:y+.3}));
+  else if(h==='corinth')neu.push(prt(bx(.28,.3,.29),BRONZE,{y:y+.03}),prt(bx(.05,.16,.34),pl,{y:y+.25}));
+  else if(h==='attic'){neu.push(dome(BRONZE,y+.06),prt(bx(.05,.15,.32),pl,{y:y+.25}));if(det)neu.push(prt(bx(.04,.16,.12),BRONZE,{x:-.13,y:y-.02,z:.04}),prt(bx(.04,.16,.12),BRONZE,{x:.13,y:y-.02,z:.04}));}
   else if(h==='cap')neu.push(prt(cn(.17,.24,6),IRON,{y:y+.2}));
+  else if(h==='pilos')neu.push(prt(cn(.15,.34,6),BRONZE,{y:y+.25}),prt(cy(.17,.17,.04,6),BRONZE,{y:y+.09}));
+  else if(h==='iron'){neu.push(dome(IRON,y+.06),prt(cy(.03,.04,.08,4),IRON,{y:y+.25}));if(det)neu.push(prt(bx(.28,.05,.1),IRON,{y:y+.03,z:-.14}));}
+  else if(h==='wolf'){neu.push(dome(0x6b5034,y+.06,.19));if(det)neu.push(prt(bx(.12,.08,.14),0x5a4028,{y:y+.12,z:.15}),prt(cn(.05,.1,4),0x5a4028,{x:-.09,y:y+.25}),prt(cn(.05,.1,4),0x5a4028,{x:.09,y:y+.25}));}
+  else if(h==='bare')neu.push(prt(bx(.26,.08,.26),HAIR,{y:y+.12}));
   else neu.push(prt(bx(.27,.1,.27),0xb5803a,{y:y+.14}));
 }
-function shieldPart(fid,team,x,y,z,small){
-  const s=SHIELD[fid],k=small?.7:1;
-  if(s==='scutum')team.push(jt(2,prt(bx(.6*k,.95*k,.08),0xdddddd,{x,y,z})));
-  else if(s==='round')team.push(jt(2,prt(cy(.45*k,.45*k,.07,10),0xdddddd,{x,y,z,rx:Math.PI/2})));
-  else team.push(jt(2,prt(cy(.3*k,.3*k,.07,10),0xdddddd,{x,y,z,rx:Math.PI/2,sz:1.7})));
+function shieldPart(k,team,neu,x,y,z,s,det){ // the face takes the faction colour; boss, rim and emblem are metal and paint
+  const J=p=>jt(2,p),em=k.em,R=Math.PI/2,boss=r=>J(prt(cn(r,r*.9,5),IRON,{x,y,z:z+.03+r*.45,rx:R}));
+  if(s==='scutum'){ // curved: a centre board and two wings bent back
+    team.push(J(prt(bx(.36,.95,.08),0xdddddd,{x,y,z})),J(prt(bx(.17,.95,.08),0xdddddd,{x:x-.25,y,z:z-.035,ry:-.42})),J(prt(bx(.17,.95,.08),0xdddddd,{x:x+.25,y,z:z-.035,ry:.42})));
+    neu.push(J(prt(bx(.13,.15,.07),IRON,{x,y,z:z+.06})));
+    if(det&&em!=null)for(const [dx,dy,r] of [[-.08,.2,.55],[.08,.2,-.55],[-.08,-.2,-.55],[.08,-.2,.55]])neu.push(J(pane(.04,.3,em,{x:x+dx,y:y+dy,z:z+.047,rz:r})));}
+  else if(s==='round'){team.push(J(prt(cy(.45,.45,.07,10),0xdddddd,{x,y,z,rx:R})));
+    if(det){neu.push(J(disc(.5,10,BRONZE,{x,y,z:z-.005})));if(em!=null)neu.push(J(disc(.16,8,em,{x,y,z:z+.042})));}}
+  else if(s==='oval'){team.push(J(prt(cy(.3,.3,.07,10),0xdddddd,{x,y,z,rx:R,sz:1.7})));neu.push(boss(.09));if(det)neu.push(J(prt(bx(.05,.9,.04),WOOD,{x,y,z:z+.04})));}
+  else if(s==='small'){team.push(J(prt(cy(.32,.32,.07,10),0xdddddd,{x,y,z,rx:R})));neu.push(boss(.07));if(det)neu.push(J(disc(.36,10,BRONZE,{x,y,z:z-.005})));}
 }
-function footFig(fid,kind,weap){
-  const team=[],neu=[];
-  neu.push(jt(3,prt(bx(.16,.8,.18),LEATHER,{x:-.11,y:.4})),jt(4,prt(bx(.16,.8,.18),LEATHER,{x:.11,y:.4})));
-  team.push(prt(bx(.46,.62,.28),0xffffff,{y:1.11}),prt(bx(.52,.2,.32),0xaaaaaa,{y:.82}));
+function bodyParts(k,team,neu,y,w,h,d,skirt,det){
+  const b=k.body;
+  if(b==='mail')neu.push(prt(bx(w+.03,h-.02,d+.03),MAIL,{y:y-.02}));
+  else if(b==='bronze')neu.push(prt(bx(w+.02,h,d+.02),BRONZE,{y}));
+  else if(b==='linen'){neu.push(prt(bx(w+.02,h,d+.02),LINEN,{y}));if(det)team.push(prt(bx(w+.04,.08,d+.04),0xffffff,{y:y+h*.22}));}
+  else if(b==='bare')neu.push(prt(bx(w,h,d),SKIN,{y}));
+  else{team.push(prt(bx(w,h,d),0xffffff,{y}));
+    if(b==='plate')neu.push(prt(bx(.22,.22,.04),BRONZE,{y:y+.1,z:d/2+.01}));
+    else if(b==='disc'){neu.push(prt(bx(.3,.3,.03),BRONZE,{y:y+.06,z:d/2+.01}));if(det)for(const [dx,dy] of [[-.07,.12],[.07,.12],[0,-.01]])neu.push(disc(.06,6,0xd8b062,{x:dx,y:y+dy,z:d/2+.03}));}}
+  if(skirt)team.push(prt(bx(skirt[1],.2,skirt[2]),b==='bare'?0x8a8a8a:0xaaaaaa,{y:skirt[0]}));
+  if(det&&b!=='bronze')neu.push(prt(bx(w+.05,.06,d+.05),LEATHER,{y:y-h/2+.04}));
+  if(k.cloak)team.push(prt(bx(w+.04,h+.3,.05),0xbbbbbb,{y:y-.1,z:-d/2-.04,rx:.08}));
+}
+function legParts(k,team,neu){
+  const L=k.legs;
+  for(const [j,x] of [[3,-.11],[4,.11]]){
+    if(L==='trousers')team.push(jt(j,prt(bx(.16,.8,.18),0x8a8a8a,{x,y:.42})));
+    else if(L==='boots')neu.push(jt(j,prt(bx(.16,.42,.18),SKIN,{x,y:.6})),jt(j,prt(bx(.17,.42,.19),LEATHER,{x,y:.21})));
+    else{neu.push(jt(j,prt(bx(.16,.8,.18),SKIN,{x,y:.42})));if(L==='greaves'||(L==='greave1'&&j===3))neu.push(jt(j,prt(bx(.18,.36,.2),BRONZE,{x,y:.25})));}
+  }
+}
+function footFig(fid,type){
+  const T=UNITS[type],kind=T.kind,weap=kind==='missile'?(T.cls==='archer'?'bow':T.cls==='sling'?'sling':'jav'):'',k=kitOf(fid,type),det=GQ[gfx].det,team=[],neu=[];
+  const sh=weap==='bow'||weap==='sling'?'none':kind==='missile'?(k.shield==='none'?'none':'small'):k.shield;
+  legParts(k,team,neu);bodyParts(k,team,neu,1.11,.46,.62,.28,[.82,.52,.32],det);
   neu.push(jt(2,prt(bx(.12,.5,.14),SKIN,{x:-.3,y:1.1,z:.05})));
   neu.push(jt(1,kind==='spear'?prt(bx(.12,.14,.46),SKIN,{x:.3,y:1.34,z:.2}):prt(bx(.12,.5,.14),SKIN,{x:.3,y:1.1,z:.05}))); // spearmen hold the shaft level
-  headParts(fid,1.57,neu);
-  if(kind==='inf'){shieldPart(fid,team,-.3,1.05,.24);neu.push(jt(1,prt(bx(.05,.05,.62),0xd8d8d8,{x:.32,y:1.0,z:.35,rx:-.3})));}
-  else if(kind==='spear'){shieldPart(fid,team,-.28,1.15,.26);neu.push(jt(1,prt(cy(.025,.025,3.0,4),WOOD,{x:.3,y:1.45,z:.75,rx:1.35})),jt(1,prt(cn(.05,.22,4),IRON,{x:.3,y:1.8,z:2.31,rx:1.35})));}
+  headParts(k,1.57,neu,det);
+  if(kind==='inf'){shieldPart(k,team,neu,-.3,1.05,.24,sh,det);neu.push(jt(1,prt(bx(.05,.05,.62),0xd8d8d8,{x:.32,y:1.0,z:.35,rx:-.3})));}
+  else if(kind==='spear'){shieldPart(k,team,neu,-.28,1.15,.26,sh,det);neu.push(jt(1,prt(cy(.025,.025,3.0,4),WOOD,{x:.3,y:1.45,z:.75,rx:1.35})),jt(1,prt(cn(.05,.22,4),IRON,{x:.3,y:1.8,z:2.31,rx:1.35})));}
   else if(weap==='bow')neu.push(jt(13,prt(new THREE.TorusGeometry(.5,.025,4,8,Math.PI),WOOD,{x:-.32,y:1.2,z:.3,rz:-Math.PI/2,ry:-Math.PI/2})),prt(bx(.14,.5,.14),LEATHER,{x:.1,y:1.2,z:-.22,rx:.2}));
   else if(weap==='sling')neu.push(prt(bx(.18,.16,.12),LEATHER,{x:-.26,y:.86,z:.1}),jt(1,prt(bx(.03,.42,.03),0x9a8a6a,{x:.32,y:.7,z:.1})));
-  else{shieldPart(fid,team,-.28,1.05,.22,true);neu.push(jt(1,prt(cy(.02,.02,1.6,4),WOOD,{x:.3,y:1.5,z:.2,rx:.35})),jt(1,prt(cy(.02,.02,1.6,4),WOOD,{x:.36,y:1.5,z:.12,rx:.25})));}
+  else{shieldPart(k,team,neu,-.28,1.05,.22,sh,det);neu.push(jt(1,prt(cy(.02,.02,1.6,4),WOOD,{x:.3,y:1.5,z:.2,rx:.35})),jt(1,prt(cy(.02,.02,1.6,4),WOOD,{x:.36,y:1.5,z:.12,rx:.25})));}
   return{team,neu,rig:FOOT_RIG};
 }
-function cavFig(fid,kind){
-  const team=[],neu=[],hc=kind==='gen'?0xd9d2c3:HORSE,y0=1.45;
+function cavFig(fid,type){
+  const kind=UNITS[type].kind,k=kitOf(fid,type),det=GQ[gfx].det,team=[],neu=[],hc=HORSE_C[type]||HORSE,y0=1.45;
   neu.push(prt(bx(.56,.62,1.6),hc,{y:1.18}),jt(7,prt(bx(.3,.62,.36),hc,{y:1.62,z:.78,rx:-.55})),jt(7,prt(bx(.24,.28,.58),hc,{y:1.9,z:1.08})));
+  if(det)neu.push(jt(7,prt(bx(.08,.5,.16),HORSE_D,{y:1.82,z:.66,rx:-.55}))); // mane
   [[-.18,.6],[.18,.6],[-.18,-.6],[.18,-.6]].forEach(([x,z],i)=>neu.push(jt(3+i,prt(bx(.13,.9,.14),HORSE_D,{x,y:.45,z}))));
   neu.push(jt(10,prt(bx(.09,.55,.09),HORSE_D,{y:1.15,z:-.86,rx:.45})));
-  team.push(prt(bx(.62,.38,1.0),0xbbbbbb,{y:1.28}),prt(bx(.44,.58,.27),0xffffff,{y:y0+.55}));
-  neu.push(prt(bx(.5,.18,.5),LEATHER,{y:y0+.18}),jt(2,prt(bx(.12,.48,.14),SKIN,{x:-.3,y:y0+.52})));
+  team.push(prt(bx(.62,.38,1.0),0xbbbbbb,{y:1.28}));neu.push(prt(bx(.5,.18,.5),LEATHER,{y:y0+.18}));
+  bodyParts(k,team,neu,y0+.55,.44,.58,.27,null,det);
+  if(det)for(const s of [-1,1]){const tr=k.legs==='trousers';(tr?team:neu).push(prt(bx(.13,.5,.15),tr?0x8a8a8a:k.legs==='boots'?LEATHER:SKIN,{x:s*.33,y:y0+.02,z:.12,rx:-.35}));} // the rider's legs
+  neu.push(jt(2,prt(bx(.12,.48,.14),SKIN,{x:-.3,y:y0+.52})));
   neu.push(jt(1,kind==='gen'?prt(bx(.12,.48,.14),SKIN,{x:.3,y:y0+.52}):prt(bx(.12,.14,.44),SKIN,{x:.3,y:y0+.72,z:.2})));
-  headParts(fid,y0+1.0,neu);
-  if(kind==='gen'){team.push(prt(bx(.5,.85,.05),0x999999,{y:1.95,z:-.2,rx:.25}));neu.push(jt(1,prt(bx(.05,.05,.8),0xdadada,{x:.33,y:1.8,z:.4,rx:-.4})),prt(bx(.06,.4,.3),0xf2c94c,{y:y0+1.4}));}
-  else{shieldPart(fid,team,-.32,1.95,.05,true);neu.push(jt(1,prt(cy(.025,.025,3.2,4),WOOD,{x:.32,y:2.25,z:.8,rx:1.3})),jt(1,prt(cn(.05,.22,4),IRON,{x:.32,y:2.7,z:2.44,rx:1.3})));}
+  headParts(k,y0+1.0,neu,det);
+  if(kind==='gen')neu.push(jt(1,prt(bx(.05,.05,.8),0xdadada,{x:.33,y:1.8,z:.4,rx:-.4})));
+  else{shieldPart(k,team,neu,-.32,1.95,.05,k.shield==='none'?'none':'small',det);neu.push(jt(1,prt(cy(.025,.025,3.2,4),WOOD,{x:.32,y:2.25,z:.8,rx:1.3})),jt(1,prt(cn(.05,.22,4),IRON,{x:.32,y:2.7,z:2.44,rx:1.3})));}
   return{team,neu,rig:CAV_RIG};
 }
 function elephFig(){
@@ -1670,8 +1789,8 @@ mat3 rig(out vec3 t){
   dep.onBeforeCompile=sh=>{sh.uniforms.uT=R3.uT;sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\n'+head).replace('#include <begin_vertex>',pos);};
   return[mat,dep];
 }
-const figKey=u=>u.fid+'|'+u.kind+'|'+(u.kind==='missile'?missileWeap(u):'');
-function figParts(u){return u.kind==='eleph'?elephFig():isCav(u)?cavFig(u.fid,u.kind):footFig(u.fid,u.kind,missileWeap(u));}
+const figKey=u=>u.fid+'|'+u.cu.type; // every unit type has its own kit
+function figParts(u){return u.kind==='eleph'?elephFig():isCav(u)?cavFig(u.fid,u.cu.type):footFig(u.fid,u.cu.type);}
 
 /* ================= BATTLE: SCENE ================= */
 function initRenderer(){
@@ -1687,44 +1806,208 @@ function initRenderer(){
 }
 function fit(){const el=$('#bGL'),w=el.clientWidth,h=el.clientHeight;if(!w||!h)return;R3.renderer.setSize(w,h,false);R3.cam.aspect=w/h;R3.cam.updateProjectionMatrix();R3.W=w;R3.H=h;}
 function buildGround(scene){
-  const T=THREE,g=new T.PlaneGeometry((FX+170)*2,(FZ+170)*2,110,120);g.rotateX(-Math.PI/2);
+  const T=THREE,q=GQ[gfx].seg,g=new T.PlaneGeometry((FX+170)*2,(FZ+170)*2,Math.round(110*q),Math.round(120*q));g.rotateX(-Math.PI/2);
   const p=g.attributes.position;for(let i=0;i<p.count;i++)p.setY(i,heightAt(p.getX(i),p.getZ(i)));
   const ng=g.toNonIndexed();g.dispose();
-  const a=ng.attributes.position,c=new Float32Array(a.count*3),tc=new T.Color(),rr=mulberry32(5);
-  for(let i=0;i<a.count;i+=3){ // one colour per facet for the low-poly look
-    const x=(a.getX(i)+a.getX(i+1)+a.getX(i+2))/3,z=(a.getZ(i)+a.getZ(i+1)+a.getZ(i+2))/3,y=(a.getY(i)+a.getY(i+1)+a.getY(i+2))/3;
-    const town=z*B.ter.ts>WALL_Z-2&&Math.abs(z)<FZ+25&&Math.abs(x)<FX+25;
-    tc.set(town?0xb7a074:forestAt(x,z)?0x52682f:0x86984a).multiplyScalar(.92+rr()*.12+y*.012);
+  const a=ng.attributes.position,c=new Float32Array(a.count*3),tc=new T.Color(),rr=mulberry32(5),gn=B.ter.gn;
+  const C=h=>new T.Color(h),lush=C(0x86984a),lush2=C(0x7a9243),dry=C(0xa6a35c),dirt=C(0x8e7c55),wood=C(0x52682f),rock=C(0x80845a),town=C(0xb7a074);
+  for(let i=0;i<a.count;i+=3){ // one colour per facet for the low-poly look: meadow, drier patches, bare earth, rocky slopes, dark woodland floor
+    const x0=a.getX(i),y0=a.getY(i),z0=a.getZ(i),ux=a.getX(i+1)-x0,uy=a.getY(i+1)-y0,uz=a.getZ(i+1)-z0,vx=a.getX(i+2)-x0,vy=a.getY(i+2)-y0,vz=a.getZ(i+2)-z0;
+    const x=x0+(ux+vx)/3,y=y0+(uy+vy)/3,z=z0+(uz+vz)/3,nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx,up=Math.abs(ny)/(Math.hypot(nx,ny,nz)||1);
+    if(z*B.ter.ts>WALL_Z-2&&Math.abs(z)<FZ+25&&Math.abs(x)<FX+25)tc.copy(town);
+    else if(forestAt(x,z))tc.copy(wood).multiplyScalar(.9+.18*vnoise(x*.15,z*.15));
+    else{const n1=vnoise(x*.022+gn,z*.022),n2=vnoise(x*.07+gn*2,z*.07+9);
+      tc.copy(lush).lerp(lush2,n2).lerp(dry,sstep(.55,.8,n1)*.75).lerp(dirt,sstep(.8,.93,n2)*.8).lerp(dry,sstep(4,9,y)*.3).lerp(rock,sstep(.96,.84,up)*.6);
+      if(onRoad(x,z,4.8))tc.lerp(dirt,.4);} // verges worn by the carts
+    tc.multiplyScalar(.93+rr()*.1+y*.01);
     if(Math.abs(x)>FX||Math.abs(z)>FZ)tc.multiplyScalar(.86);
     for(let k=0;k<3;k++){c[(i+k)*3]=tc.r;c[(i+k)*3+1]=tc.g;c[(i+k)*3+2]=tc.b;}}
   ng.setAttribute('color',new T.BufferAttribute(c,3));ng.computeVertexNormals();
-  const m=new T.Mesh(ng,new T.MeshLambertMaterial({vertexColors:true}));m.receiveShadow=true;scene.add(m);return m;
+  const mat=lamb({vertexColors:true});
+  mat.onBeforeCompile=sh=>{sh.uniforms.uMud={value:R3.mud.tex}; // the ground churns to mud wherever the lines have fought
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec2 vMud;').replace('#include <begin_vertex>',`#include <begin_vertex>\nvMud=vec2((position.x+${FX}.)/${2*FX}.,(position.z+${FZ}.)/${2*FZ}.);`);
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nuniform sampler2D uMud;varying vec2 vMud;').replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb=mix(diffuseColor.rgb,vec3(.15,.105,.065),texture2D(uMud,vMud).r*.85);');};
+  const m=new T.Mesh(ng,mat);m.receiveShadow=true;scene.add(m);return m;
+}
+/* trampled ground: a 256² mask over the field, painted where men fight and horses run */
+function mkMud(){const N=256,data=new Uint8Array(N*N*4),tex=new THREE.DataTexture(data,N,N);tex.magFilter=tex.minFilter=THREE.LinearFilter;tex.needsUpdate=true;return{N,data,tex,t:0,dirty:false};}
+function mudPaint(x,z,r,amt){ // r in world units, amt out of 255
+  const M=R3.mud;if(!M||B.headless)return;const N=M.N,cx=(x+FX)/(2*FX)*N,cz=(z+FZ)/(2*FZ)*N,rx=r/(2*FX)*N,rz=r/(2*FZ)*N,D=M.data;
+  for(let j=Math.max(0,Math.floor(cz-rz));j<=Math.min(N-1,Math.ceil(cz+rz));j++)for(let i=Math.max(0,Math.floor(cx-rx));i<=Math.min(N-1,Math.ceil(cx+rx));i++){
+    const d=Math.hypot((i+.5-cx)/rx,(j+.5-cz)/rz);if(d<1){const o=(j*N+i)*4;D[o]=Math.min(255,D[o]+amt*(1-d*d));}}
+  M.dirty=true;
+}
+function mudTick(vdt){
+  const M=R3.mud;if(!M||B.phase!=='battle'||B.headless||(M.t-=vdt)>0)return;M.t=.4;
+  for(const u of B.units){if(!onField(u)||!u.alive.length)continue;
+    if(u.contacts.length&&u.state!=='rout'){for(let k=0,n=Math.min(u.dm.f,u.alive.length);k<n;k+=3){const f=u.alive[k];mudPaint(f.x,f.z,2.4,big(u)?14:9);}}
+    else if(u.running&&big(u)){const f=u.alive[Math.floor(Math.random()*u.alive.length)];mudPaint(f.x,f.z,2,5);}}
+  if(M.dirty){M.tex.needsUpdate=true;M.dirty=false;}
 }
 function placeInstances(scene,geo,mat,items,shadow){ // items: [x,y,z,rotY,sx,sy,sz,colorHex|null]
   const T=THREE,m=new T.InstancedMesh(geo,mat,Math.max(1,items.length)),c=new T.Color(),up=new T.Vector3(0,1,0);
   items.forEach(([x,y,z,ry,sx,sy,sz,col],i)=>{_q.setFromAxisAngle(up,ry);_p.set(x,y,z);_s.set(sx,sy,sz);_M.compose(_p,_q,_s);m.setMatrixAt(i,_M);if(col!=null)m.setColorAt(i,c.set(col));});
   if(!items.length)m.count=0;m.castShadow=shadow;m.receiveShadow=true;scene.add(m);return m;
 }
+const lamb=o=>new THREE.MeshLambertMaterial(o);
 function buildScenery(scene){
-  const T=THREE,R=B.ter.R,ts=B.ter.ts,vc=new T.MeshLambertMaterial({vertexColors:true}),plain=()=>new T.MeshLambertMaterial();
-  const trees=[],tint=()=>new T.Color(.85+R()*.2,.85+R()*.2,.8+R()*.15).getHex();
-  for(const W of B.ter.woods){const n=Math.round(W.r*W.r*.07);for(let i=0;i<n;i++){const a=R()*6.28,r=Math.sqrt(R())*W.r,x=W.x+Math.cos(a)*r,z=W.z+Math.sin(a)*r,s=.8+R()*.6;trees.push([x,heightAt(x,z)-.1,z,R()*6,s,s*(.85+R()*.3),s,tint()]);}}
-  for(let i=0;i<170;i++){const x=(R()*2-1)*(FX+160),z=(R()*2-1)*(FZ+160);if((Math.abs(x)<FX+6&&Math.abs(z)<FZ+6)||z*ts>WALL_Z-6)continue;const s=.8+R()*.7;trees.push([x,heightAt(x,z)-.1,z,R()*6,s,s,s,tint()]);}
-  placeInstances(scene,mergeParts([prt(cy(.22,.32,2,5),0x5a3d22,{y:1}),prt(cn(1.7,3.4,6),0x3d6a2a,{y:3.3}),prt(cn(1.3,2.6,6),0x4a7a33,{y:4.7})]),vc,trees,true);
-  // the town at the defenders' end
-  const houses=[],roofs=[];
-  for(let z=TOWN_Z+3;z<FZ+34;z+=9)for(let x=-FX-24;x<FX+24;x+=9){
-    if(R()<.22||(Math.abs(x)<8&&z<FZ+10))continue;
-    const hx=x+(R()-.5)*3,hz=z*ts+(R()-.5)*2,w=4+R()*3,h=3+R()*3,d=4+R()*3,ry=R()<.5?0:Math.PI/2,y=heightAt(hx,hz)-.2;
-    houses.push([hx,y,hz,ry,w,h,d,pick([0xe8dcc0,0xdcc69c,0xcfb68c,0xe2d3b4])]);roofs.push([hx,y+h,hz,ry,w*1.02,1.8+R()*1.2,d*1.02,pick([0xa4553a,0x9a4a32,0xb0613f])]);}
-  const hg=new T.BoxGeometry(1,1,1);hg.translate(0,.5,0);const rg=new T.ConeGeometry(.75,1,4);rg.rotateY(Math.PI/4);rg.translate(0,.5,0);
-  placeInstances(scene,hg,plain(),houses,true);placeInstances(scene,rg,plain(),roofs,true);
-  if(B.walls){ // walls with three gates
-    const h=[0,2.6,4,5.5][B.walls],col=B.walls===1?0x7a5a38:0x9d9586,segs=[],zw=WALL_Z*ts;let x=-FX-30;
-    const edges=[...GATES.flatMap(g=>[g-GATE_W/2,g+GATE_W/2]),FX+30];
-    for(let i=0;i<edges.length;i+=2){const x1=edges[i];segs.push([(x+x1)/2,0,zw,0,x1-x,h,1.6,col]);segs.push([x1,0,zw,0,3.2,h+2,3.2,col]);if(i+1<edges.length){x=edges[i+1];segs.push([x,0,zw,0,3.2,h+2,3.2,col]);}}
-    const wg=new T.BoxGeometry(1,1,1);wg.translate(0,.5,0);placeInstances(scene,wg,plain(),segs,true);
+  const T=THREE,R=B.ter.R,ts=B.ter.ts,trees=[],tint=()=>new T.Color(.85+R()*.2,.85+R()*.2,.8+R()*.15).getHex();
+  for(const W of B.ter.woods){const n=Math.round(W.r*W.r*.07);for(let i=0;i<n;i++){const a=R()*6.28,r=Math.sqrt(R())*W.r,x=W.x+Math.cos(a)*r,z=W.z+Math.sin(a)*r,s=.8+R()*.6;if(!onRoad(x,z,4.5))trees.push([x,heightAt(x,z)-.1,z,R()*6,s,s*(.85+R()*.3),s,tint()]);}}
+  for(let i=0;i<170;i++){const x=(R()*2-1)*(FX+160),z=(R()*2-1)*(FZ+160);if((Math.abs(x)<FX+6&&Math.abs(z)<FZ+6)||z*ts>WALL_Z-6||onRoad(x,z,5))continue;const s=.8+R()*.7;trees.push([x,heightAt(x,z)-.1,z,R()*6,s,s,s,tint()]);}
+  placeInstances(scene,mergeParts([prt(cy(.22,.32,2,5),0x5a3d22,{y:1}),prt(cn(1.7,3.4,6),0x3d6a2a,{y:3.3}),prt(cn(1.3,2.6,6),0x4a7a33,{y:4.7})]),lamb({vertexColors:true}),trees,true);
+  buildRoad(scene);buildRocks(scene,R);buildGrass(scene);buildTown(scene);
+}
+function buildRoad(scene){ // a cart track with two worn ruts, draped over the field
+  const T=THREE,ts=B.ter.ts,O=[-1,-.62,-.42,-.18,.18,.42,.62,1],hw=2.9,P=[],C=[],I=[];
+  const cE=new T.Color(0x8d8a52),cR=new T.Color(0xa08a5e),cT=new T.Color(0x7c6646),col=[cE,cR,cT,cR,cR,cT,cR,cE];let rows=0;
+  for(let zl=-FZ-165;zl<=WALL_Z+1;zl+=2){
+    const x=roadX(zl);let dx=roadX(zl+1)-roadX(zl-1),dz=2;const l=Math.hypot(dx,dz);dx/=l;dz/=l;
+    for(let k=0;k<8;k++){const px=x+dz*O[k]*hw,pz=(zl-dx*O[k]*hw)*ts;P.push(px,heightAt(px,pz)+.15,pz);C.push(col[k].r,col[k].g,col[k].b);}
+    if(rows){const a=(rows-1)*8,b=rows*8;for(let k=0;k<7;k++)I.push(a+k,b+k,b+k+1,a+k,b+k+1,a+k+1);}rows++;}
+  const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(P,3));g.setAttribute('color',new T.Float32BufferAttribute(C,3));g.setIndex(I);g.computeVertexNormals();
+  const m=new T.Mesh(g,lamb({vertexColors:true,side:T.DoubleSide,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3}));m.receiveShadow=true;scene.add(m);
+}
+function buildRocks(scene,R){
+  const T=THREE,ts=B.ter.ts,items=[],put=(x,z,s)=>{if(!onRoad(x,z,3.5+s)&&z*ts<WALL_Z-8&&!forestAt(x,z))items.push([x,z,s]);};
+  for(let i=0;i<80;i++)put((R()*2-1)*(FX+70),(R()*2-1)*(FZ+70),.25+R()*.6);
+  for(const H of B.ter.hills)for(let i=0,n=4+Math.round(H.h);i<n;i++){const a=R()*6.28,r=Math.sqrt(R())*H.r*.7;put(H.x+Math.cos(a)*r,H.z+Math.sin(a)*r,.3+R()*1.1);} // outcrops on the hills
+  const m=new T.InstancedMesh(new T.DodecahedronGeometry(1,0),lamb(),Math.max(1,items.length)),c=new T.Color(),cols=[0x8b8478,0x7d776c,0x9a9282,0x857a68];
+  items.forEach(([x,z,s],i)=>{_e.set(R()*.6,R()*6.28,R()*.6);_q.setFromEuler(_e);_p.set(x,heightAt(x,z)-s*.25,z);_s.set(s*(.8+R()*.6),s*.6,s*(.8+R()*.6));_M.compose(_p,_q,_s);m.setMatrixAt(i,_M);m.setColorAt(i,c.set(pick(cols)));});
+  m.count=items.length;m.castShadow=m.receiveShadow=true;scene.add(m);
+}
+function buildGrass(scene){ // tufts and wild flowers, swaying in the wind; they fade out with distance and vanish where the ground is trampled
+  const N=GQ[gfx].grass;if(!N)return;
+  const T=THREE,R=mulberry32(91),ts=B.ter.ts,gn=B.ter.gn,tuft=[],flow=[],far=gfx==='high'?140:105,vt=R3.renderer.capabilities.maxVertexTextures>0;
+  for(let k=0;k<N*2&&tuft.length+flow.length<N;k++){const x=(R()*2-1)*(FX+30),z=(R()*2-1)*(FZ+30);
+    if(z*ts>WALL_Z-4||onRoad(x,z,3.4)||vnoise(x*.07+gn*2,z*.07+9)>.84||R()>.3+.7*vnoise(x*.05+7,z*.05))continue; // bare patches stay bare; meadows grow thicker
+    (vnoise(x*.09+3,z*.09+gn)>.66&&R()<.45?flow:tuft).push([x,z,R()]);}
+  const mat=lamb({vertexColors:true}); // blades are two-faced triangles that both catch the light from above, so none turns black from behind
+  mat.onBeforeCompile=sh=>{sh.uniforms.uT=R3.uT;sh.uniforms.uMud={value:R3.mud.tex};
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nuniform float uT;uniform sampler2D uMud;').replace('#include <begin_vertex>',`#include <begin_vertex>
+vec3 ip=vec3(instanceMatrix[3]);float fd=1.-smoothstep(${(far*.55).toFixed(1)},${far.toFixed(1)},distance(ip,cameraPosition));
+${vt?`fd*=1.-smoothstep(.25,.6,texture2D(uMud,vec2((ip.x+${FX}.)/${2*FX}.,(ip.z+${FZ}.)/${2*FZ}.)).r);`:''}
+transformed*=fd;transformed.x+=sin(uT*1.9+ip.x*.35+ip.z*.21)*.09*position.y;transformed.z+=sin(uT*1.4+ip.z*.3)*.05*position.y;`);};
+  const geo=(P,Cl)=>{const g=new T.BufferGeometry(),P2=[...P],C2=[...Cl],nm=[];
+    for(let i=0;i<P.length;i+=9){P2.push(...P.slice(i+3,i+6),...P.slice(i,i+3),...P.slice(i+6,i+9));C2.push(...Cl.slice(i+3,i+6),...Cl.slice(i,i+3),...Cl.slice(i+6,i+9));} // the back faces
+    for(let i=0;i<P2.length;i+=3)nm.push(0,1,0);
+    g.setAttribute('position',new T.Float32BufferAttribute(P2,3));g.setAttribute('color',new T.Float32BufferAttribute(C2,3));g.setAttribute('normal',new T.Float32BufferAttribute(nm,3));return g;};
+  const tP=[],tC=[],b=new T.Color(0x5d7a33),t=new T.Color(0xb5c96a);
+  for(let k=0;k<3;k++){const a=k/3*6.283+.4,lx=Math.cos(a),lz=Math.sin(a),w=.08,h=.42+.08*k;tP.push(-lz*w,0,lx*w,lz*w,0,-lx*w,lx*.2,h,lz*.2);tC.push(b.r,b.g,b.b,b.r,b.g,b.b,t.r,t.g,t.b);}
+  const fP=[-.02,0,0,.02,0,0,0,.4,0],fC=[.25,.4,.15,.25,.4,.15,.25,.4,.15];
+  for(let k=0;k<4;k++){const a=k*Math.PI/2,b2=a+Math.PI/2;fP.push(0,.47,0,Math.cos(a)*.09,.4,Math.sin(a)*.09,Math.cos(b2)*.09,.4,Math.sin(b2)*.09);fC.push(1,1,1,1,1,1,1,1,1);}
+  const FL=[0xf4e7a1,0xffffff,0xe8a9d8,0xf2c94c,0xa9b8f2];
+  const CH=64,c=new T.Color(),up=new T.Vector3(0,1,0);R3.grass=[];R3.grassFar=far+CH*.75;
+  const put=(g,items,col)=>{const by={}; // in square patches, so those off screen or out of range aren't drawn at all
+    for(const it of items){const k=Math.floor((it[0]+FX+30)/CH)+','+Math.floor((it[1]+FZ+30)/CH);(by[k]=by[k]||[]).push(it);}
+    for(const k in by){const list=by[k],m=new T.InstancedMesh(g,mat,list.length);let cx=0,cz=0;
+      list.forEach(([x,z,r],i)=>{const s=.7+r*.7;_q.setFromAxisAngle(up,r*40);_p.set(x,heightAt(x,z)-.03,z);_s.set(s,s*(.8+R()*.5),s);_M.compose(_p,_q,_s);m.setMatrixAt(i,_M);m.setColorAt(i,col(x,z,r,c));cx+=x;cz+=z;});
+      m.receiveShadow=true;m.computeBoundingSphere();scene.add(m);R3.grass.push({m,x:cx/list.length,z:cz/list.length});}};
+  put(geo(tP,tC),tuft,(x,z,r,c)=>{c.setRGB(.85+r*.25,.9+r*.2,.8+r*.15);return c.lerp(new T.Color(1.15,1.05,.7),sstep(.55,.8,vnoise(x*.022+gn,z*.022))*.8);});
+  put(geo(fP,fC),flow,(x,z,r,c)=>c.set(FL[Math.floor(vnoise(x*.03,z*.03+gn)*4.99)]));
+}
+/* ---- the town ---- */
+function prismGeo(){ // a gable roof: ridge along x, from y 0 to 1, spanning -.5..5 on x and z
+  const A=[-.5,0,-.5],Bv=[.5,0,-.5],C=[.5,0,.5],D=[-.5,0,.5],E=[-.5,1,0],F=[.5,1,0],P=[];
+  for(const t of [[D,C,F],[D,F,E],[Bv,A,E],[Bv,E,F],[A,D,E],[C,Bv,F]])for(const v of t)P.push(...v);
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(P,3));g.computeVertexNormals();return g;
+}
+function hipGeo(){const g=new THREE.ConeGeometry(.71,1,4).toNonIndexed();g.rotateY(Math.PI/4);g.translate(0,.5,0);g.computeVertexNormals();return g;}
+function houseGeo(st){ // walls 1×1×1 standing on y=0, front door on +z; windows by storey
+  const D=0x3a2a1c,F=.503,P=[prt(bx(1,1,1),0xffffff,{y:.5}),pane(.16,st===1?.5:.3,D,{y:st===1?.25:.15,z:F})];
+  if(GQ[gfx].det){const rows=st===1?[.66]:st===2?[.3,.74]:[.2,.5,.8],wh=.21/st;
+    for(const y of rows){for(const x of [-.3,.3])P.push(pane(.1,wh,D,{x,y,z:F}),pane(.1,wh,D,{x,y,z:-F,ry:Math.PI}));
+      for(const z of [-.25,.25])P.push(pane(.1,wh,D,{x:F,y,z,ry:Math.PI/2}),pane(.1,wh,D,{x:-F,y,z,ry:-Math.PI/2}));}
+    for(let k=1;k<st;k++)P.push(prt(bx(1.02,.025,1.02),0x8a6a48,{y:k/st}));} // a timber band between storeys
+  return mergeParts(P);
+}
+function templeGeo(){ // a podium temple, front to −z: steps up from the square, a porch of columns, the cella and a pediment
+  const M=0xece6d6,M2=0xd9d0bc,TL=0xa4553a,P=[prt(bx(20,2.2,15),M2,{y:1.1,z:1.8})];
+  for(let k=0;k<4;k++){const d=3.8-.95*k;P.push(prt(bx(14,.55*(k+1),d),M2,{y:.275*(k+1),z:-5.7-d/2}));}
+  for(let x=-7.5;x<=7.5;x+=3)P.push(prt(cy(.42,.48,6,8),M,{x,y:5.2,z:-4.6}));
+  for(const x of [-7.5,7.5])for(let z=-1.6;z<8;z+=3)P.push(prt(cy(.42,.48,6,8),M,{x,y:5.2,z}));
+  P.push(prt(bx(11,6,11),0xe6dfcc,{y:5.2,z:3}),pane(2.6,4,0x3a2a1c,{y:4.2,z:-2.52,ry:Math.PI}),prt(bx(17,1,13.6),M,{y:8.7,z:1.8}));
+  P.push(prt(prismGeo(),TL,{y:9.2,z:1.8,ry:Math.PI/2,sx:14.4,sy:2.6,sz:17.8}),prt(prismGeo(),M,{y:9.2,z:-5.25,ry:Math.PI/2,sx:.5,sy:2.5,sz:16.6}),prt(bx(.5,.7,.3),0xd8b062,{y:12,z:-5.5}));
+  for(const s of [-1,1])P.push(prt(bx(1.1,1,1.1),M2,{x:s*9.2,y:2.7,z:-4.9}),prt(cy(.25,.3,1.7,6),0x6f7a5a,{x:s*9.2,y:4.05,z:-4.9})); // statues on the podium
+  return mergeParts(P);
+}
+function stoaGeo(){ // a colonnade with shops along its back wall, front to −z
+  const M=0xece6d6,W=0xe2d3b4,P=[prt(bx(38,.6,7),0xd9d0bc,{y:.3}),prt(bx(38,4.6,.8),W,{y:2.9,z:3.1}),prt(bx(.7,4.6,7),W,{x:-18.9,y:2.9}),prt(bx(.7,4.6,7),W,{x:18.9,y:2.9})];
+  for(let x=-17.5;x<=17.5;x+=2.5)P.push(prt(cy(.28,.32,4,6),M,{x,y:2.6,z:-2.9}));
+  for(let x=-15;x<=15;x+=5)P.push(pane(1.4,2.4,0x3a2a1c,{x,y:1.8,z:2.69,ry:Math.PI}));
+  P.push(prt(bx(38.6,.6,1.1),M,{y:4.9,z:-2.9}),prt(prismGeo(),0xa4553a,{y:5.2,sx:39,sy:1.7,sz:7.8}));
+  return mergeParts(P);
+}
+function townGround(scene){ // paving on the square and the avenues, beaten earth between the houses
+  const T=THREE,ts=B.ter.ts,R=mulberry32(17),S=2,P=[],C=[],N=[],c=new T.Color(),pave=new T.Color(0xc9bea6),street=new T.Color(0xab9f88),earth=new T.Color(0x9a8a6a);
+  const ave=x=>GATES.some(g=>Math.abs(x-g)<AVE_W/2);
+  for(let zl=WALL_Z-1;zl<FZ+42;zl+=S)for(let x=-FX-34;x<FX+34;x+=S){const cx=x+S/2,cz=zl+S/2;
+    c.copy(cz<TOWN_Z?pave:ave(cx)||(cz>136&&cz<146)?street:earth).multiplyScalar(.9+R()*.12);if(cz<TOWN_Z&&R()<.06)c.multiplyScalar(.88);
+    const za=zl*ts,zb=(zl+S)*ts;for(const [px,pz] of [[x,za],[x+S,za],[x+S,zb],[x,za],[x+S,zb],[x,zb]]){P.push(px,.2,pz);C.push(c.r,c.g,c.b);N.push(0,1,0);}}
+  const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(P,3));g.setAttribute('color',new T.Float32BufferAttribute(C,3));g.setAttribute('normal',new T.Float32BufferAttribute(N,3));
+  const m=new T.Mesh(g,lamb({vertexColors:true,side:T.DoubleSide,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));m.receiveShadow=true;scene.add(m);
+}
+function buildTown(scene){
+  const T=THREE,TW=B.town,ts=B.ter.ts,R=mulberry32(33),walls=[[],[],[]],gab=[],hip=[];
+  townGround(scene);
+  for(const h of TW.houses){const cx=(h.x0+h.x1)/2,cz=(h.z0+h.z1)/2*ts,w=h.x1-h.x0,d=h.z1-h.z0,ax=Math.abs(Math.sin(h.ry))<.5,sx=ax?w:d,sz=ax?d:w;
+    walls[h.st-1].push([cx,.2,cz,h.ry,sx,h.h,sz,h.wc]);
+    if(h.gable){const lx=sx>=sz;gab.push([cx,.2+h.h,cz,h.ry+(lx?0:Math.PI/2),(lx?sx:sz)*1.08,h.rh,(lx?sz:sx)*1.14,h.rc]);} // ridge along the long side
+    else hip.push([cx,.2+h.h,cz,h.ry,sx*1.08,h.rh*.8,sz*1.08,h.rc]);}
+  walls.forEach((it,i)=>{if(it.length)placeInstances(scene,houseGeo(i+1),lamb({vertexColors:true}),it,true);});
+  placeInstances(scene,prismGeo(),lamb(),gab,true);placeInstances(scene,hipGeo(),lamb(),hip,true);
+  const at=(geo,o)=>{const m=new T.Mesh(geo,lamb({vertexColors:true}));m.position.set(o.x,.2,o.z*ts);m.rotation.y=ts===1?0:Math.PI;m.castShadow=m.receiveShadow=true;scene.add(m);}; // facing the square
+  at(templeGeo(),TW.temple);if(TW.stoa)at(stoaGeo(),TW.stoa);
+  if(TW.cyp.length)placeInstances(scene,mergeParts([prt(cy(.15,.2,1.2,5),0x5a3d22,{y:.6}),prt(cn(.85,6,6),0x2f5226,{y:3.9})]),lamb({vertexColors:true}),TW.cyp.map(([x,z,s])=>[x,.2,z*ts,R()*6,s,s*(.9+R()*.3),s,null]),true);
+  if(B.walls)buildWalls(scene);
+}
+function buildWalls(scene){
+  const T=THREE,ts=B.ter.ts,lv=B.walls,R=B.ter.R,zw=WALL_Z*ts,out=-ts,ins=[],mer=[],caps=[],box=new T.BoxGeometry(1,1,1);box.translate(0,.5,0); // out: toward the attackers
+  const spans=[];let x0=-FX-30;for(const g of GATES){spans.push([x0,g-GATE_W/2]);x0=g+GATE_W/2;}spans.push([x0,FX+30]);
+  const gEdge=x=>GATES.some(g=>Math.abs(Math.abs(x-g)-GATE_W/2)<.01);
+  if(lv===1){ // a palisade of sharpened stakes, with timber towers at the gates
+    const posts=[];
+    for(const [a,b] of spans){for(let px=a+.4;px<b;px+=.8)posts.push([px,-.3,zw+(R()-.5)*.3,R()*6,1,.9+R()*.25,1,pick([0x7a5a38,0x6e5032,0x84633f,0x735436])]);
+      ins.push([(a+b)/2,1.5,zw-out*.45,0,b-a,.25,.2,0x5e4429]);} // a rail along the inside
+    placeInstances(scene,mergeParts([prt(cy(.2,.22,3.2,5),0xffffff,{y:1.6}),prt(cn(.22,.5,5),0xffffff,{y:3.45})]),lamb(),posts,true);
+    placeInstances(scene,box,lamb(),ins,true);
+    const W2=0x84633f,tw=mergeParts([...[[-1.4,-1.4],[1.4,-1.4],[-1.4,1.4],[1.4,1.4]].map(([x,z])=>prt(cy(.2,.24,6.4,5),0x6e5032,{x,y:3.2,z})),prt(bx(3.6,.3,3.6),0x7a5a38,{y:4.6}),
+      prt(bx(3.6,.9,.15),W2,{y:5.2,z:-1.75}),prt(bx(3.6,.9,.15),W2,{y:5.2,z:1.75}),prt(bx(.15,.9,3.6),W2,{x:-1.75,y:5.2}),prt(bx(.15,.9,3.6),W2,{x:1.75,y:5.2}),prt(cn(3.1,1.8,4),0x5e4429,{y:7.3,ry:Math.PI/4})]);
+    placeInstances(scene,tw,lamb({vertexColors:true}),GATES.flatMap(g=>[-1,1].map(s=>[g+s*(GATE_W/2+1.9),0,zw,0,1,1,1,null])),true);
+  }else{ // stone curtain wall with battlements, towers along it, and a gatehouse over each gate
+    const h=lv===2?4:5.5,col=lv===2?0xa39b8a:0xb8b0a0,dk=new T.Color(col).multiplyScalar(.8).getHex(),lt=new T.Color(col).multiplyScalar(1.06).getHex(),TH=h+3;
+    const tower=(tx,tz,roof)=>{ins.push([tx,0,tz,0,5,TH,5,col]);
+      if(roof)caps.push([tx,TH,tz,0,6,3,6,0xa4553a]);else for(const o of [-1.6,0,1.6])mer.push([tx+o,TH,tz-2.25,0,.8,.8,.5,lt],[tx+o,TH,tz+2.25,0,.8,.8,.5,lt],[tx-2.25,TH,tz+o,Math.PI/2,.8,.8,.5,lt],[tx+2.25,TH,tz+o,Math.PI/2,.8,.8,.5,lt]);};
+    for(const [a,b] of spans){
+      ins.push([(a+b)/2,0,zw,0,b-a,h,2,col],[(a+b)/2,0,zw+out*.15,0,b-a,.8,2.4,dk]); // the curtain and its footing
+      for(let px=a+1;px<b-.5;px+=1.6)mer.push([px,h,zw+out*.75,0,.85,.85,.5,lt]);
+      const ta=gEdge(a)?a+2.6:null,tb=gEdge(b)?b-2.6:null;if(ta!=null)tower(ta,zw+out*.6,true);if(tb!=null)tower(tb,zw+out*.6,true);
+      const s0=ta??a,s1=tb??b,n=Math.floor((s1-s0)/26);for(let k=1;k<=n;k++)tower(s0+(s1-s0)*k/(n+1),zw+out*.9,false);}
+    for(const g of GATES){ins.push([g,h+1,zw,0,GATE_W+.4,2.4,3,col]); // the gatehouse bridge, high enough for elephants to pass under
+      for(let px=g-GATE_W/2+.6;px<g+GATE_W/2;px+=1.6)mer.push([px,h+3.4,zw+out*1.25,0,.85,.85,.5,lt]);
+      for(const s of [-1,1])ins.push([g+s*(GATE_W/2-.6),h,zw,0,1.2,1,3,dk]);}
+    placeInstances(scene,box,lamb(),ins,true);placeInstances(scene,box.clone(),lamb(),mer,true);placeInstances(scene,hipGeo(),lamb(),caps,true);
   }
+}
+/* ---- standards: every unit carries one, a pole with a crossbar and a cloth that stirs in the wind ---- */
+function mkBanners(scene){
+  const T=THREE,n=B.units.length,pole=mergeParts([prt(cy(.035,.04,4.4,4),WOOD,{y:2.2}),prt(bx(1.3,.06,.06),WOOD,{y:4.15}),prt(new T.SphereGeometry(.12,6,4),0xf2c94c,{y:4.47})]);
+  const cg=new T.PlaneGeometry(1.2,1.05,6,4);cg.translate(0,3.6,0);const cc=new Float32Array(cg.attributes.position.count*3);
+  for(let i=0;i<cc.length/3;i++)cc[i*3]=cc[i*3+1]=cc[i*3+2]=cg.attributes.position.getY(i)<3.2?.6:1;cg.setAttribute('color',new T.BufferAttribute(cc,3));
+  const cm=lamb({vertexColors:true,side:T.DoubleSide});
+  cm.onBeforeCompile=sh=>{sh.uniforms.uT=R3.uT;sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nuniform float uT;').replace('#include <begin_vertex>',`#include <begin_vertex>
+float ph=instanceMatrix[3][0]*.37+instanceMatrix[3][2]*.21,hang=4.125-position.y;
+transformed.z+=sin(uT*2.7+position.x*2.4+ph)*.1*(.4+hang)-hang*hang*.08;transformed.x+=sin(uT*1.7+ph)*.05*hang;`);};
+  const P=new T.InstancedMesh(pole,lamb({vertexColors:true}),n),C=new T.InstancedMesh(cg,cm,n),c=new T.Color();
+  B.units.forEach((u,i)=>{P.setMatrixAt(i,ZERO);C.setMatrixAt(i,ZERO);C.setColorAt(i,c.set(FACTIONS[u.fid].color));});
+  for(const m of [P,C]){m.frustumCulled=false;m.instanceMatrix.setUsage(T.DynamicDrawUsage);scene.add(m);}
+  P.castShadow=true;return{P,C};
+}
+function updBanners(){ // the standard rides beside a man in the middle of the second rank (on the howdah for elephants)
+  const {P,C}=R3.ban,Y=_d.set(0,1,0);
+  B.units.forEach((u,i)=>{const al=u.alive,n=al.length;if(!n||!onField(u)){P.setMatrixAt(i,ZERO);C.setMatrixAt(i,ZERO);return;}
+    const d=u.dm,f=al[Math.min(n-1,d.r>1?d.f+(d.f>>1):d.f>>1)],el=u.kind==='eleph',up=el?3.7:isCav(u)?1.25:0,ox=el?0:.42,oz=el?-.6:-.05,cs=Math.cos(f.yaw),sn=Math.sin(f.yaw);
+    _q.setFromAxisAngle(Y,f.yaw);_p.set(f.x+ox*cs+oz*sn,f.y+up,f.z-ox*sn+oz*cs);_s.setScalar(1);_M.compose(_p,_q,_s);P.setMatrixAt(i,_M);C.setMatrixAt(i,_M);});
+  P.instanceMatrix.needsUpdate=C.instanceMatrix.needsUpdate=true;
 }
 function buildZone(scene){
   const T=THREE,Z=zoneOf(0),g=new T.PlaneGeometry(Z.x1-Z.x0,Z.z1-Z.z0,30,8);g.rotateX(-Math.PI/2);g.translate((Z.x0+Z.x1)/2,0,(Z.z0+Z.z1)/2);
@@ -1749,10 +2032,11 @@ function buildScene(){
   const T=THREE,s=new T.Scene();R3.scene=s;
   s.background=new T.Color(0xaec6d4);s.fog=new T.Fog(0xaec6d4,230,560);
   s.add(new T.HemisphereLight(0xe6f0ff,0x6b5a3a,1.6));
-  const sun=new T.DirectionalLight(0xfff0d8,2.4);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);
+  const sun=new T.DirectionalLight(0xfff0d8,2.4),sm=GQ[gfx].shadow;sun.castShadow=sm>0;sun.shadow.mapSize.set(sm||1024,sm||1024);
   sun.shadow.camera.near=10;sun.shadow.camera.far=420;sun.shadow.bias=-.0006;sun.shadow.normalBias=.5;s.add(sun);s.add(sun.target);R3.sun=sun;R3.shadowSz=0;
+  R3.clk=0;R3.shake=0;R3.uT={value:0};R3.mud=mkMud();
   R3.ground=buildGround(s);buildScenery(s);R3.zone=buildZone(s);
-  R3.clk=0;R3.shake=0;R3.uT={value:0};[R3.figMat,R3.figDepth]=rigMats();
+  [R3.figMat,R3.figDepth]=rigMats();
   const groups={};
   for(const u of B.units){const k=figKey(u);(groups[k]=groups[k]||{u,n:0}).n+=u.figs.length;}
   R3.fm={};
@@ -1766,14 +2050,15 @@ function buildScene(){
     for(const f of u.figs){f.key=k;f.mi=fm.i++;fm.team.setColorAt(f.mi,c.copy(fc).multiplyScalar(.86+Math.random()*.2));fm.neu.setColorAt(f.mi,c.setScalar(.9+Math.random()*.14));}}
   R3.proj=new T.InstancedMesh(mergeParts([prt(bx(.05,.05,1.1),0x3b2a1a),prt(cn(.06,.18,4),0x777777,{z:.6,rx:Math.PI/2})]),new T.MeshLambertMaterial({vertexColors:true}),PROJ_N);
   R3.proj.frustumCulled=false;R3.proj.instanceMatrix.setUsage(T.DynamicDrawUsage);for(let i=0;i<PROJ_N;i++)R3.proj.setMatrixAt(i,ZERO);s.add(R3.proj);
-  R3.projFree=[...Array(PROJ_N).keys()];
+  R3.projFree=[...Array(PROJ_N).keys()].reverse();R3.proj.count=0; // low slots are used first, and only the slots in use are drawn
   R3.dust=mkFX(s,500,true);R3.bits=mkFX(s,500,false);
   R3.rib=[];for(let i=0;i<30;i++)R3.rib.push(mkRibbon(s));
+  R3.ban=mkBanners(s);
 }
 function teardown(){
   cancelAnimationFrame(R3.raf);R3.raf=0;AU.ambient(false);
   if(R3.scene)R3.scene.traverse(o=>{if(o.isInstancedMesh)o.dispose();if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});
-  if(R3.figDepth)R3.figDepth.dispose();
+  if(R3.figDepth)R3.figDepth.dispose();if(R3.mud)R3.mud.tex.dispose();R3.mud=R3.ban=R3.grass=null;
   R3.scene=null;if(R3.renderer)R3.renderer.renderLists.dispose();
   $('#bLabels').innerHTML='';$('#bCards').innerHTML='';$('#battle').classList.add('hidden');
 }
@@ -1810,7 +2095,7 @@ function chargeFX(a,b,braced){ // dust, a shove through the enemy front and a jo
   const r=segSeg(a.sg,b.sg),cx=(r[1]+r[3])/2,cz=(r[2]+r[4])/2,bg=big(a),el=a.kind==='eleph';
   let dx=b.x-a.x,dz=b.z-a.z;const l=Math.hypot(dx,dz)||1;dx/=l;dz/=l;
   for(let i=0;i<(bg?10:5);i++)fxDust(cx+rnd(-1,1)*a.dm.hw,cz+rnd(-1.5,1.5),bg);
-  R3.shake=Math.max(R3.shake,(el?1.3:bg?.8:.35)*spat(cx,cz)[0]);
+  R3.shake=Math.max(R3.shake,(el?1.3:bg?.8:.35)*spat(cx,cz)[0]);mudPaint(cx,cz,Math.min(a.dm.hw,8),bg?60:35);
   if(braced){a.knock={x:-dx,z:-dz,t:B.time};fxSparks(cx,heightAt(cx,cz)+1.8,cz,10);return;}
   if(!bg)return;
   b.knock={x:dx,z:dz,t:B.time,big:el};
@@ -1863,7 +2148,7 @@ function updShots(){ // missiles arc to the target; arrows and javelins stay stu
     if(sh.sl)_s.set(t<1?2.4:0,t<1?2.4:0,.11);else _s.set(1,1,1);
     if(t>=1){sh.done=true;if(Math.random()<.25)fxDust(x1,z1,false,.35);}
     _M.compose(_p,_q,_s);R3.proj.setMatrixAt(sh.i,_M);}
-  B.shots=keep;R3.proj.instanceMatrix.needsUpdate=true;
+  B.shots=keep;R3.proj.count=keep.reduce((a,sh)=>Math.max(a,sh.i+1),0);R3.proj.instanceMatrix.needsUpdate=true;
 }
 function updFigs(vdt){ // soldiers keep their place in the ranks, square off in melee, and fall where they are struck
   const t=R3.clk+=vdt,snap=vdt>=50;R3.uT.value=t;
@@ -1874,7 +2159,9 @@ function updFigs(vdt){ // soldiers keep their place in the ranks, square off in 
     const guard=fight?1:u.cover>B.time&&u.wk!=='bow'&&u.wk!=='sling'?2:0;
     for(let j=0;j<n;j++){const f=al[j],file=j%d.f,rank=Math.floor(j/d.f),rowN=rank===d.r-1?n-rank*d.f:d.f;
       const ox=((file-(rowN-1)/2)*L.sx+f.jx*jit)*spread,oz=(((d.r-1)/2-rank)*L.sz+f.jz*jit)*spread;
-      let tx=u.x+lx*ox+fx*oz,tz=u.z+lz*ox+fz*oz,face=u.face,e=null;f.tx=tx;f.tz=tz;
+      let tx=u.x+lx*ox+fx*oz,tz=u.z+lz*ox+fz*oz,face=u.face,e=null;
+      if(B.blk){const o=unblock(tx,tz,B.blk,B.esc);if(o){tx=o[0];tz=o[1];}} // a man whose place in the ranks is inside a house stands at its wall instead
+      f.tx=tx;f.tz=tz;
       if(rank<duel){ // the front rank squares off against a man of the enemy line; spearmen strike from the second rank too
         e=f.foe;if(!e||!e.alive||!u.contacts.includes(e.u)||(e.x-f.x)**2+(e.z-f.z)**2>49)e=f.foe=findFoe(u,f);
         if(e){const ex=e.x-f.x,ez=e.z-f.z,l=Math.hypot(ex,ez)||1,D=(reach+REACH(e.u))/2;face=Math.atan2(ex,ez);
@@ -1884,6 +2171,7 @@ function updFigs(vdt){ // soldiers keep their place in the ranks, square off in 
       let ms=maxS;if(f.kv>.05){f.x+=f.kx*f.kv*vdt;f.z+=f.kz*f.kv*vdt;f.kv*=Math.exp(-vdt*4);ms*=.08;} // shoved back by a charge or a blow
       const dx=tx-f.x,dz=tz-f.z,dist=Math.hypot(dx,dz),x0=f.x,z0=f.z;
       if(dist>ms&&dist>1e-6){f.x+=dx/dist*ms;f.z+=dz/dist*ms;}else{f.x=tx;f.z=tz;}
+      if(B.blk){const o=unblock(f.x,f.z,B.blk,B.esc);if(o){f.x=o[0];f.z=o[1];}}
       f.yaw=snap?u.face:f.yaw+angDiff(f.yaw,!e&&dist>1.2&&!fight?Math.atan2(dx,dz):face)*Math.min(1,vdt*8);
       if(!snap&&vdt>0){const st=Math.hypot(f.x-x0,f.z-z0);f.wp+=st/stride*6.283;f.wa+=(clamp(st/vdt/gait,0,1.2)-f.wa)*Math.min(1,vdt*6);}
       f.g+=(guard-f.g)*Math.min(1,vdt*5);}
@@ -1906,7 +2194,7 @@ function updFigs(vdt){ // soldiers keep their place in the ranks, square off in 
         f.y=heightAt(f.x,f.z)+Math.abs(Math.sin(f.wp))*(cav?.2:bg?.1:.07)*wa;
       }else if(!f.fled){ // falling: back, forward, sideways, or through the air when a charge hits
         if(f.air){f.vy-=22*vdt;f.ay+=f.vy*vdt;if(f.ay<=0&&f.vy<0){f.ay=0;f.air=false;f.vy=0;}}
-        if(f.vx||f.vz){f.x+=f.vx*vdt;f.z+=f.vz*vdt;if(!f.air){const k=Math.exp(-vdt*7);f.vx*=k;f.vz*=k;if(Math.abs(f.vx)+Math.abs(f.vz)<.05)f.vx=f.vz=0;}}
+        if(f.vx||f.vz){f.x+=f.vx*vdt;f.z+=f.vz*vdt;if(B.blk){const o=unblock(f.x,f.z,B.blk,B.esc);if(o){f.x=o[0];f.z=o[1];f.vx=f.vz=0;}}if(!f.air){const k=Math.exp(-vdt*7);f.vx*=k;f.vz*=k;if(Math.abs(f.vx)+Math.abs(f.vz)<.05)f.vx=f.vz=0;}}
         f.fall=Math.min(1,f.fall+vdt*(f.die==='thrown'?1.6:2.2));const e2=f.fall*f.fall;
         if(bg)roll=e2*1.45*f.roll;
         else if(f.die==='fwd'){tilt=e2*1.45;ap=rest+1.3*f.fall;sp=.1+1.2*f.fall;}
@@ -1919,6 +2207,7 @@ function updFigs(vdt){ // soldiers keep their place in the ranks, square off in 
       A[o]=f.wp;A[o+1]=wa;A[o+2]=ap;A[o+3]=push;Bv[o]=ay;Bv[o+1]=sp;Bv[o+2]=sy;Bv[o+3]=nk;}}
   for(const k in R3.fm){const fm=R3.fm[k];fm.team.instanceMatrix.needsUpdate=fm.neu.instanceMatrix.needsUpdate=fm.aA.needsUpdate=fm.aB.needsUpdate=true;}
   if(!snap){fxUpd(R3.dust,vdt);fxUpd(R3.bits,vdt);}
+  if(R3.ban)updBanners();
 }
 function updRibbons(){
   let k=0;const put=(cx,cz,face,a,b,w,col,op)=>{if(k<R3.rib.length)setRibbon(R3.rib[k++],cx,cz,face,a,b,w,col,op);};
@@ -1952,6 +2241,7 @@ function camUpdate(dt){
   const gh=heightAt(c.position.x,c.position.z)+3;if(c.position.y<gh)c.position.y=gh;
   if(R3.shake>.02){const s=R3.shake*cam.d*.025;c.position.x+=(Math.random()-.5)*s;c.position.y+=(Math.random()-.5)*s;c.position.z+=(Math.random()-.5)*s;R3.shake*=Math.exp(-dt*7);} // charges jolt the view
   c.lookAt(cam.tx,ty,cam.tz);
+  if(R3.grass)for(const g of R3.grass)g.m.visible=Math.hypot(g.x-c.position.x,g.z-c.position.z)<R3.grassFar;
   const sun=R3.sun,sz=Math.round(clamp(cam.d*.9,45,170)/5)*5;
   sun.position.set(cam.tx-60,ty+120,cam.tz+50);sun.target.position.set(cam.tx,ty,cam.tz);
   if(sz!==R3.shadowSz){const sc=sun.shadow.camera;sc.left=sc.bottom=-sz;sc.right=sc.top=sz;sc.updateProjectionMatrix();R3.shadowSz=sz;}
@@ -2086,11 +2376,11 @@ async function runBattle0(o){
   });
 }
 function startBattle(o,done){
-  initRenderer();
+  initRenderer();R3.renderer.setPixelRatio(gfxPR());R3.renderer.shadowMap.enabled=GQ[gfx].shadow>0;
   const attSide=o.playerIsAttacker?0:1;
   B={o,done,phase:'deploy',time:0,speed:1,lastSpeed:1,acc:0,attSide,defSide:1-attSide,walls:o.walls||0,townBonus:1+3*(o.walls||0),
      sel:new Set(),insp:null,over:false,auto:false,headless:false,aiT:[0,0],events:[],pairs:new Set(),rLoss:[0,0],shots:[],uiT:0,lastInfo:'',lastCard:{id:null,t:0}};
-  B.ter=mkTerrain(B.defSide);
+  B.ter=mkTerrain(B.defSide);B.town=mkTown();mkBlock();
   B.units=[...o.pUnits.map(u=>mkBU(u,0,PLAYER)),...o.eUnits.map(u=>mkBU(u,1,o.eFid))];
   autoDeploy(0);autoDeploy(1);B.init=[sideMen(0),sideMen(1)];
   for(const u of B.units)u.sg=seg(u);
@@ -2108,7 +2398,7 @@ function frame(now){
   if(B.phase==='battle'&&!B.over&&!B.headless){
     B.acc+=dt*B.speed;let n=0;while(B.acc>=SIM_DT&&n<12&&!B.over){simStep(SIM_DT);B.acc-=SIM_DT;n++;}if(n>=12)B.acc=0;vdt=dt*B.speed;}
   else if(B.headless)vdt=dt*4;
-  camUpdate(dt);updFigs(Math.min(vdt,.2));updShots();updRibbons();updLabels();battleAudio(dt);
+  camUpdate(dt);updFigs(Math.min(vdt,.2));mudTick(vdt);updShots();updRibbons();updLabels();battleAudio(dt);
   R3.renderer.render(R3.scene,R3.cam);
   B.uiT-=dt;if(B.uiT<=0){B.uiT=.25;hud();}
 }
@@ -2462,9 +2752,9 @@ function cmCityGeo(n,s,cap){
   return mergeParts(P);
 }
 function cmFigGeo(fid,type){
-  const T=UNITS[type],k=T.kind,w=k==='missile'?(T.cls==='archer'?'bow':T.cls==='sling'?'sling':'jav'):'',key=fid+'|'+k+'|'+w;
+  const k=UNITS[type].kind,key=fid+'|'+type;
   if(CM.figs[key])return CM.figs[key];
-  const fc=new THREE.Color(FACTIONS[fid].color),pr=k==='eleph'?elephFig():(k==='cav'||k==='gen')?cavFig(fid,k):footFig(fid,k,w);
+  const fc=new THREE.Color(FACTIONS[fid].color),pr=k==='eleph'?elephFig():(k==='cav'||k==='gen')?cavFig(fid,type):footFig(fid,type);
   const parts=[...pr.team.map(q=>({geo:q.geo,o:q.o,color:new THREE.Color(q.color).multiply(fc).getHex()})),...pr.neu];
   return CM.figs[key]=mergeParts(parts);
 }
@@ -2664,7 +2954,7 @@ function cmInit(){
   if(CM.ok)return;
   const T=THREE;for(const n of NODES)n.z=n.y;
   cmPalette();cmField();
-  const r=new T.WebGLRenderer({antialias:true,powerPreference:'high-performance'});r.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+  const r=new T.WebGLRenderer({antialias:true,powerPreference:'high-performance'});r.setPixelRatio(gfxPR());
   $('#mapGL').appendChild(r.domElement);CM.rend=r;CM.v=new T.Vector3();
   CM.cam=new T.PerspectiveCamera(40,1,8,7000);
   const sc=CM.scene=new T.Scene();sc.background=new T.Color(0x93bccb);sc.fog=new T.Fog(0x93bccb,900,3000);
@@ -2848,9 +3138,11 @@ function factionsBody(){
 }
 async function openMenu(){
   if(UI.busy)return;
-  const v=await modal({title:'Imperivm',body:factionsBody(),buttons:[{label:'Resume',value:'r',cls:'primary'},{label:'Last dispatches',value:'d'},{label:'Unit size: '+SIZE_NAME[unitSize],value:'u'},{label:'How to play',value:'h'},{label:'New campaign',value:'n'}]});
+  const v=await modal({title:'Imperivm',body:factionsBody(),buttons:[{label:'Resume',value:'r',cls:'primary'},{label:'Last dispatches',value:'d'},{label:'Unit size: '+SIZE_NAME[unitSize],value:'u'},{label:'Graphics: '+GFX_NAME[gfx],value:'g'},{label:'How to play',value:'h'},{label:'New campaign',value:'n'}]});
   if(v==='u'){unitSize=SIZES[(SIZES.indexOf(unitSize)+1)%SIZES.length];try{localStorage.setItem(SIZE_KEY,unitSize);}catch(e){}
     toast('Unit size: '+SIZE_NAME[unitSize]+' — '+{normal:'one figure for every 4 men',large:'one figure for every 2 men',huge:'every man on the field'}[unitSize]);return openMenu();}
+  if(v==='g'){gfx=GFXS[(GFXS.indexOf(gfx)+1)%GFXS.length];try{localStorage.setItem(GFX_KEY,gfx);}catch(e){}if(CM.rend){CM.rend.setPixelRatio(gfxPR());cmFit();}
+    toast('Graphics: '+GFX_NAME[gfx]+' — '+{low:'fastest: no shadows or grass',medium:'shadows, grass and kit details',high:'sharpest, with the thickest grass'}[gfx]);return openMenu();}
   if(v==='d')showReports(G.last||[],'Last dispatches');
   if(v==='h')modal({title:'How to play',body:help(),buttons:[{label:'Got it',value:1,cls:'primary'}]});
   if(v==='n'){const ok=await modal({title:'Start over?',body:'<p>Your current campaign will be erased.</p>',buttons:[{label:'Start a new campaign',value:1,cls:'primary'},{label:'Cancel',value:0}]});if(ok)newCampaign(true);}
