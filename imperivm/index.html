@@ -847,7 +847,10 @@ function newGame(fid){
 }
 const passStates=()=>PNODES.map(p=>G.s[p.id]);
 const heldPasses=f=>passStates().filter(s=>s.owner===f&&s.units.length);
-function tidyPasses(){for(const s of passStates())if(!s.units.length&&!s.bld.walls)s.owner=null;} // nobody holds a bare pass once its army has left
+function tidyPasses(){for(const s of passStates()){
+  if(s.owner&&s.owner!==PLAYER&&!ownedBy(s.owner).length){s.units=[];s.owner=null;s.build=null;} // a people with no city left (a revolt can end them too) has no armies in the field
+  if(!s.units.length&&!s.bld.walls)s.owner=null;}} // nobody holds a bare pass once its army has left; an unfinished fort waits for its builders (build.by)
+const myBuild=s=>!!(s.build&&(s.build.by||s.owner)===PLAYER);
 const gateOn=(a,b)=>{const id=EDGE_PASS[a+'|'+b];return id?G.s[id]:null;};
 const blocksFor=(gate,fid)=>!!(gate&&gate.units.length&&gate.owner!==fid); // an enemy-held pass shuts the road to fid's armies
 const FORT_NAME=['','Timber fort','Stone fort'],FORT_COST=[0,500,1100],FORT_TURNS=[0,2,3],LAND_NAME={pass:'Mountain pass',plain:'Open plain',hills:'Rolling hills',forest:'Forest road'};
@@ -1008,7 +1011,7 @@ function renderNodes(){
     h+=`<circle r="2.6" fill="${col}"/>${s.units.length||fort||isT||UI.sel===n.id?`<text class="lbl pl" y="19">${n.name}</text>`:''}`; // bare passes are named only when they matter, to keep the map clear
     if(s.units.length){const ready=s.owner===PLAYER&&s.units.some(u=>!u.moved);
       h+=`<g class="badge${ready?' ready':''}" transform="translate(13,-9)"><rect x="-9" y="-8" width="18" height="16" rx="3" fill="${col}"/><text y="4">${s.units.length}</text></g>`;}
-    if(s.build&&s.owner===PLAYER)h+=`<text x="-20" y="-6" font-size="12">🔨</text>`;
+    if(myBuild(s))h+=`<text x="-20" y="-6" font-size="12">🔨</text>`;
     h+='</g>';}
   for(const n of NODES){
     const s=G.s[n.id],F=FACTIONS[s.owner],r=6+tier(s)*2,isT=adj&&adj.has(n.id);
@@ -1091,6 +1094,7 @@ function renderPassSheet(s){
     h+=`<div class="sh-foot"><button class="btn ghost sm" id="pkAll">All</button><button class="btn ghost sm" id="pkDis" ${n2===1?'':'disabled'}>Disband</button><button class="btn primary grow" id="pkMarch" ${n2?'':'disabled'}>March ${n2?n2+' unit'+(n2>1?'s':''):''}</button></div>`;
   }else{
     h+=`<div class="sh-body">${held?`<div class="ugrid">${s.units.map(u=>unitCard(u,s.owner,{disabled:true})).join('')}</div>`:`<div class="note">${fort?'An empty fort. Any army that marches in takes it.':'An empty pass. An army that camps here closes the road to its enemies.'}</div>`}`;
+    if(!held&&myBuild(s))h+=`<div class="note" style="margin-top:10px">🔨 Your ${FORT_NAME[s.build.lv].toLowerCase()} stands half-built: ${s.build.t} turn${s.build.t>1?'s':''} of work left. Camp an army here to finish it — an enemy who marches in first tears it down.</div>`;
     const from=ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner===PLAYER&&t.units.some(u=>!u.moved));
     if(from.length)h+=`<div class="note" style="margin-top:10px">${held?'Attack from':'Camp here from'} a neighbouring city:</div>`+from.map(t=>{const av=t.units.filter(u=>!u.moved);
       return`<div class="row"><div class="ico">${held?'⚔️':'⛺'}</div><div class="main"><div class="t">${sname(t)}</div><div class="d">${av.length} ready units · ${fmt(sumMen(av))} men</div></div><button class="btn primary sm" data-atk="${t.id}">${held?'Attack':'March'}</button></div>`;}).join('');
@@ -1110,7 +1114,7 @@ function renderPassSheet(s){
   const fb=sh.querySelector('[data-fort]');if(fb)fb.onclick=()=>doFort(s);
 }
 function doFort(s){const lv=s.bld.walls+1,c=FORT_COST[lv];if(s.build||lv>2||G.gold[PLAYER]<c||!s.units.length)return;
-  G.gold[PLAYER]-=c;s.build={lv,t:FORT_TURNS[lv]};toast(`Construction started: ${FORT_NAME[lv]} at ${sname(s)}`);AU.ui('hammer');save();render();}
+  G.gold[PLAYER]-=c;s.build={lv,t:FORT_TURNS[lv],by:PLAYER};toast(`Construction started: ${FORT_NAME[lv]} at ${sname(s)}`);AU.ui('hammer');save();render();}
 function renderSheet(){
   const s=G.s[UI.sel];if(!s)return closeSheet();
   if(s.pass)return renderPassSheet(s);
@@ -1298,7 +1302,7 @@ async function doBattle(o){
   if(attWon){
     to.units=[];
     if(defAlive.length){
-      const dest=ADJ[to.id].map(id=>G.s[id]).filter(s=>s.owner===defFid&&s.units.length<MAX_UNITS).sort((a,b)=>a.units.length-b.units.length)[0];
+      const dest=ADJ[to.id].map(id=>G.s[id]).filter(s=>s.owner===defFid&&s.units.length<MAX_UNITS&&!blocksFor(gateOn(to.id,s.id),defFid)).sort((a,b)=>a.units.length-b.units.length)[0];
       if(dest){const k=defAlive.slice(0,MAX_UNITS-dest.units.length);k.forEach(u=>u.moved=true);dest.units.push(...k);}
     }
     await capture(to,attFid,attAlive,from);
@@ -1311,7 +1315,7 @@ async function doBattle(o){
 }
 function takePass(to,fid,units,from){ // an army wins a pass or fort, or walks into an empty one, and stops there
   const prev=to.owner,fort=to.bld.walls;if(fid===PLAYER)AU.ui('fanfare');
-  to.owner=fid;to.build=null;
+  to.owner=fid;if(!(to.build&&to.build.by===fid))to.build=null; // builders who come back to their own unfinished fort carry on; anyone else tears it down
   const fit=units.slice(0,MAX_UNITS);fit.forEach(u=>u.moved=true);to.units=fit;
   if(units.length>MAX_UNITS&&from&&from.owner===fid)from.units.push(...units.slice(MAX_UNITS));
   if(fid===PLAYER)toast(`${sname(to)} is yours — the road is closed to your enemies`);
@@ -1757,21 +1761,21 @@ function placeFigs(u){ // put every man of a unit in his place in the ranks at o
   for(let j=0;j<n;j++){const f=al[j],file=j%d.f,rank=Math.floor(j/d.f),rowN=rank===d.r-1?n-rank*d.f:d.f,ox=(file-(rowN-1)/2)*L.sx,oz=((d.r-1)/2-rank)*L.sz;
     f.x=u.x+lx*ox+fx*oz;f.z=u.z+lz*ox+fz*oz;f.y=heightAt(f.x,f.z);f.yaw=u.face;}
 }
-function arrive(u){ // a relief army reaches the field from its flank and marches up to the line
-  const sg=u.side===0?1:-1,Z=zoneOf(u.side),town=!B.field&&u.side===B.defSide;
-  u.x=u.rx*(FX-14);u.z=town?sg*(WALL_Z+TOWN_Z)/2:sg*(FZ-12);u.face=homeFace(u.side);u.state='ok';u.mor=u.T.mor+u.xp*4;
-  for(const f of u.figs)f.fled=false;placeFigs(u);u.sg=seg(u);
-  const tx=u.rx*38+rnd(-6,6),tz=sg*(Z.front+(town?3:10));u.home={x:tx,z:tz};u.order='move';u.dest=openDest({x:tx,z:tz,face:homeFace(u.side)});
+function arrive(us){ // relief armies reach the field from the flank and march up to the line
+  for(const u of us){
+    const sg=u.side===0?1:-1,Z=zoneOf(u.side),town=!B.field&&u.side===B.defSide;
+    u.x=u.rx*(FX-14);u.z=town?sg*(WALL_Z+TOWN_Z)/2:sg*(FZ-12);u.face=homeFace(u.side);u.state='ok';u.mor=u.T.mor+u.xp*4;
+    for(const f of u.figs)f.fled=false;placeFigs(u);u.sg=seg(u);
+    const tx=u.rx*38+rnd(-6,6),tz=sg*(Z.front+(town?3:10));u.home={x:tx,z:tz};u.order='move';u.dest=openDest({x:tx,z:tz,face:homeFace(u.side)});
+    if(!B.headless&&R3.scene){flt(u,'RELIEF!',u.side===0?'#c4f2b0':'#ffb3a6');for(let i=0;i<6;i++)fxDust(u.x+rnd(-8,8),u.z+rnd(-3,3),true);}}
   if(B.headless||!R3.scene)return;
-  const k=u.arr+'_'+u.rx;B.ann=B.ann||{};
-  if(!B.ann[k]){B.ann[k]=1;const n=B.units.filter(x=>x.side===u.side&&x.arr===u.arr&&x.rx===u.rx).length;
-    banner(u.side===0?`Relief arrives — ${n} unit${n>1?'s':''} on the flank!`:`Enemy reinforcements — ${n} unit${n>1?'s':''} on the flank!`);
-    B.events.push({t:B.time+5,fn:()=>{if(B&&!B.over&&B.phase==='battle')banner(false);}});AU.ui(u.side===0?'fanfare':'alarm');}
-  flt(u,'RELIEF!',u.side===0?'#c4f2b0':'#ffb3a6');for(let i=0;i<6;i++)fxDust(u.x+rnd(-8,8),u.z+rnd(-3,3),true);
+  for(const s of [0,1]){const n=us.filter(u=>u.side===s).length;if(!n)continue; // one banner for everyone who arrives together
+    banner(s===0?`Relief arrives — ${n} unit${n>1?'s':''} on the flank!`:`Enemy reinforcements — ${n} unit${n>1?'s':''} on the flank!`);
+    const k=B.annK=(B.annK||0)+1;B.events.push({t:B.time+5,fn:()=>{if(B&&!B.over&&B.phase==='battle'&&B.annK===k)banner(false);}});AU.ui(s===0?'fanfare':'alarm');} // a later banner isn't cut short by this one's timer
 }
 function simStep(dt){
   B.time+=dt;
-  for(const u of B.units)if(u.state==='reserve'&&B.time>=u.arr)arrive(u);
+  const due=B.units.filter(u=>u.state==='reserve'&&B.time>=u.arr);if(due.length)arrive(due);
   computeContacts();
   for(const s of [0,1])if(s===1||B.auto){B.aiT[s]-=dt;if(B.aiT[s]<=0){B.aiT[s]=.5;aiThink(s);}}
   for(const u of B.units)if(onField(u))updUnit(u,dt);
@@ -1782,6 +1786,7 @@ function simStep(dt){
 }
 function checkOver(){
   if(!B||B.over)return true;
+  for(const s of [0,1])if(!B.units.some(u=>u.side===s&&active(u))){const rs=B.units.filter(u=>u.side===s&&u.state==='reserve');if(rs.length)arrive(rs);} // the line has broken: any relief still on the road hurries in rather than the battle ending without it
   const a0=B.units.some(u=>u.side===0&&active(u)),a1=B.units.some(u=>u.side===1&&active(u));
   if(!a0||!a1){endBattle(!a0&&!a1?B.defSide:a0?0:1,'rout');return true;}
   if(B.time>=BATTLE_TIME){endBattle(B.defSide,'time');return true;}
@@ -3278,9 +3283,9 @@ function cmSync(){
     let face=NODE[n.a];if(held)for(const e of [NODE[n.a],NODE[n.b]])if(G.s[e.id].owner!==s.owner){face=e;break;} // the army faces the enemy end of its road
     c.fy=Math.atan2(face.x-n.x,face.z-n.z);
     const isT=!!(adj&&adj.has(n.id)),foe=isT&&isFoeTarget(n.id),ready=held&&s.owner===PLAYER&&s.units.some(u=>!u.moved);
-    const lk=[own,s.units.length,ready?1:0,s.build&&s.owner===PLAYER?1:0,fort,foe?1:0].join('|');
+    const lk=[own,s.units.length,ready?1:0,myBuild(s)?1:0,fort,foe?1:0].join('|');
     if(c.lk!==lk){c.lk=lk;c.lw=0;c.lab.style.setProperty('--fc',own?FACTIONS[own].color:'#9a9486');c.lab.classList.toggle('foe',foe);
-      c.ls.textContent=(fort?'🏰':'⛰')+(s.build&&s.owner===PLAYER?'🔨':'');
+      c.ls.textContent=(fort?'🏰':'⛰')+(myBuild(s)?'🔨':'');
       c.lb.textContent=s.units.length||'';c.lb.style.display=s.units.length?'':'none';c.lb.classList.toggle('ready',ready);}
     c.small=true;c.pri=(held?2:0)+(held&&s.owner===PLAYER?4:0)+(fort?1:0)+(UI.sel===n.id?30:0)+(isT?20:0);
     c.sel.visible=UI.sel===n.id||!!(mv&&mv.from===n.id);
@@ -3464,13 +3469,18 @@ function hostileDist(f){const d={},q=[];for(const n of NODES)if(G.s[n.id].owner!
 const threat=(s,f)=>moveTargets(s.id).map(id=>G.s[id]).filter(t=>t.owner&&t.owner!==f&&t.owner!=='rebels'&&(!t.pass||t.units.length)).reduce((a,t)=>a+armyPower(t.units),0);
 function desired(s,f,hd){if(G.cap[f]===s.id)return 7;if(hd[s.id]===1)return clamp(3+Math.round(threat(s,f)/300),3,9);return 1;}
 const AI_EDGE=1.4; // an AI attacks only with this much more power than the defenders (scaled by its aggression)
+const PICKET=.8,PICKET_MIN=.45; // an army camped on a pass toward a rival aims at this share of the rival's power next door, and isn't sent out below the smaller share
+const aiFront=(p,f)=>ADJ[p.id].some(id=>{const o=G.s[id].owner;return o!==f&&o!=='rebels';}); // a pass with a rival's city at one end of its road (free cities never attack)
+const rivalPower=t=>armyPower(t.units)*(t.owner===PLAYER?.9:FACTIONS[t.owner].aggr/AI_EDGE); // as aiNeed weighs a neighbour
+const reliefPower=(t,from)=>armyPower(reliefFor(t,t.owner,from).flatMap(r=>r.units)); // the armies next door that would march to t's aid
+const campFree=ps=>{const keep=ps.bld.walls?ps.units.slice().sort((a,b)=>unitPower(b)-unitPower(a)).slice(0,2):[];return ps.units.filter(u=>!u.moved&&!keep.includes(u));}; // a fort keeps its two best units at their post
 function aiNeed(s,f,skip,deep=true,pf=.9){ // power a city of f should hold so that no hostile neighbour (other than skip) dares attack it
   let m=0;for(const id of moveTargets(s.id)){const t=G.s[id];if(id===skip||!t.owner||t.owner===f||t.owner==='rebels'||(t.pass&&!t.units.length))continue; // free cities never attack
     let p=armyPower(t.units);
     if(t.owner===PLAYER)p*=pf; // pf: how much of the player's army next door we expect to come at us
     else{if(deep&&!t.pass)p=Math.max(p*.4,p-aiNeed(t,t.owner,s.id,false)); // it must keep a garrison against its other neighbours
       p*=FACTIONS[t.owner].aggr/AI_EDGE;}
-    if(!t.pass){const g=gateOn(s.id,id);if(g&&g.units.length&&g.owner===f)p*=.5;} // our pass on that road holds them back
+    if(!t.pass){const g=gateOn(s.id,id);if(g&&g.units.length&&g.owner===f)p=Math.max(p*.5,p-armyPower(g.units)*(1+.15*g.bld.walls));} // our army on the pass meets them first: it takes their weight off the city, up to half
     if(p>m)m=p;}
   return m/(1+.15*s.bld.walls)*(G.cap[f]===s.id?1.3:1.1);
 }
@@ -3520,6 +3530,9 @@ async function aiTurn(f){
   const short=ownedBy(f).some(s=>gap(s)>0); // while the frontier is short of men, building waits for spare gold
   for(const s of shuffle(ownedBy(f))){if(s.build||started>=2)continue;const k=aiPickBuilding(s,hd);if(!k)continue;
     const c=BUILD[k].cost[s.bld[k]];if(G.gold[f]-c<(short?600:250))continue;G.gold[f]-=c;s.build={k,t:BUILD[k].turns[s.bld[k]]};started++;}
+  for(const ps of shuffle(heldPasses(f))){ // with gold to spare, an army holding a road toward a rival fortifies it (one fort at a time)
+    const lv=ps.bld.walls+1;if(ps.build||lv>2||!aiFront(PNODE[ps.id],f)||G.gold[f]-FORT_COST[lv]<(lv>1?1500:700))continue;
+    G.gold[f]-=FORT_COST[lv];ps.build={lv,t:FORT_TURNS[lv],by:f};break;}
   for(const s of ownedBy(f).map(s=>[s,gap(s)]).sort((a,b)=>b[1]-a[1]).map(x=>x[0])){ // most endangered first
     const want=desired(s,f,hd);let n=0;
     if(G.cap[f]===s.id&&countGenerals(f)<2&&G.gold[f]>1500&&s.units.length<MAX_UNITS){G.gold[f]-=UNITS.general.cost;s.units.push(mkUnit('general',true));}
@@ -3533,8 +3546,9 @@ async function aiTurn(f){
       if(t0.pass&&!t0.units.length)continue; // armies camp on a pass only when the road makes them
       const gate=t0.pass?null:gateOn(s.id,id),t=blocksFor(gate,f)?gate:t0; // a hostile pass on the road is fought first
       if(t!==t0&&t.owner===PLAYER&&G.turn<4)continue;
-      const free=aiFree(s,f,id);if(!free.length)continue; // what can leave without exposing this city to anyone but the target
-      const dp=t.units.length?armyPower(t.units)*(1+.15*t.bld.walls):0,needT=t.pass?0:aiNeed(t,f,null,true,.45); // bolder against the player: losing a city back to them is part of the game
+      const pk=gate&&gate.owner===f?campFree(gate):[]; // our own camp on that road falls in with the army as it marches by
+      const free=aiFree(s,f,id).concat(pk);if(!free.length)continue; // what can leave without exposing this city to anyone but the target
+      const dp=t.units.length?(armyPower(t.units)+reliefPower(t,s))*(1+.15*t.bld.walls):0,needT=t.pass?0:aiNeed(t,f,null,true,.45); // relief counts: it joins the fight. Bolder against the player: losing a city back to them is part of the game
       const send=aiForce(free,Math.max(dp*1.8/F.aggr,needT)),ap=armyPower(send); // enough to win cleanly and to hold the city after
       if(dp>0&&ap<dp*AI_EDGE/F.aggr)continue;
       const left=dp?ap*(.95-.4*(dp/ap)**2):ap; // roughly what survives the fight (see autoResolve)
@@ -3543,34 +3557,46 @@ async function aiTurn(f){
       if(left<needT*.8)sc*=.35;
       if(sc>bs){bs=sc;best=t;bestSend=send;}}
     if(!best)continue;
-    const send=bestSend;
+    const send=bestSend,camp=best.pass?null:gateOn(s.id,best.id);
     await cmMarchAI(s.id,best.id,f,send);
-    s.units=s.units.filter(u=>!send.includes(u));send.forEach(u=>u.moved=true);
+    s.units=s.units.filter(u=>!send.includes(u));if(camp)camp.units=camp.units.filter(u=>!send.includes(u));send.forEach(u=>u.moved=true);
     await doBattle({attFid:f,units:send,from:s,to:best});
     if(G.lost)return;
   }
   for(const p of shuffle(PNODES)){ // armies camped on passes: a fort's garrison stays; the rest strike a hostile end of the road, or fall back to a friendly one
     const ps=G.s[p.id];if(ps.owner!==f||!ps.units.length||G.lost)continue;
-    const keep=ps.bld.walls?ps.units.slice().sort((a,b)=>unitPower(b)-unitPower(a)).slice(0,2):[];
-    const free=ps.units.filter(u=>!u.moved&&!keep.includes(u));if(!free.length)continue;
+    const free=campFree(ps);if(!free.length)continue;
     let best=null,bs=0;const ap=armyPower(free);
     for(const id of ADJ[p.id]){const e=G.s[id];if(e.owner===f||(e.owner===PLAYER&&G.turn<4))continue;
-      const dp=e.units.length?armyPower(e.units)*(1+.15*e.bld.walls):0;if(dp>0&&ap<dp*AI_EDGE/F.aggr)continue;
+      const dp=e.units.length?(armyPower(e.units)+reliefPower(e,ps))*(1+.15*e.bld.walls):0;if(dp>0&&ap<dp*AI_EDGE/F.aggr)continue;
       const sc=(ap+1)/(dp+50)+(e.owner===PLAYER?.3:0)+e.pop/20000;if(sc>bs){bs=sc;best=e;}}
     if(!best){
-      if(ps.bld.walls)continue; // a fort is a post, not a stopping place
+      if(ps.bld.walls||aiFront(p,f))continue; // a fort is a post, and a road that faces an enemy is worth holding
       best=ADJ[p.id].map(id=>G.s[id]).filter(e=>e.owner===f&&e.units.length<MAX_UNITS).sort((a,b)=>a.units.length-b.units.length)[0];if(!best)continue;}
     const mv=best.owner===f?free.slice(0,MAX_UNITS-best.units.length):free;if(!mv.length)continue;
     await cmMarchAI(p.id,best.id,f,mv);
     ps.units=ps.units.filter(u=>!mv.includes(u));mv.forEach(u=>u.moved=true);
     if(best.owner===f)best.units.push(...mv);else await doBattle({attFid:f,units:mv,from:ps,to:best});
   }
+  for(const s of shuffle(ownedBy(f))){ // pickets: men to spare camp on the pass toward a rival, so that an attack down that road is met in the open field first
+    for(const pid of shuffle(CPASS[s.id].slice())){
+      const ps=G.s[pid],p=PNODE[pid],o=G.s[p.a===s.id?p.b:p.a];
+      if(s.owner!==f||G.lost||(ps.units.length&&ps.owner!==f)||o.owner===f||o.owner==='rebels')continue; // an enemy camp is for the attack loop
+      const foe=rivalPower(o),have=armyPower(ps.units)*(1+.15*ps.bld.walls);if(have>=foe*PICKET)continue;
+      const free=aiFree(s,f);if(!free.length)break;
+      const send=aiForce(free,foe*PICKET-have).slice(0,MAX_UNITS-ps.units.length);
+      if(!send.length||have+armyPower(send)<foe*PICKET_MIN)continue; // too few to stand: they would only be swept away
+      await cmMarchAI(s.id,pid,f,send);
+      s.units=s.units.filter(u=>!send.includes(u));send.forEach(u=>u.moved=true);
+      if(ps.units.length)ps.units.push(...send);else takePass(ps,f,send,s);
+    }
+  }
   hd=hostileDist(f);
   const toStage={},st=goal&&goal.stage&&goal.stage.owner===f?goal.stage.id:null; // steps through our own land to the gathering city
-  if(st){toStage[st]=0;const q=[st];while(q.length){const c=q.shift();for(const m of ADJ[c])if(toStage[m]===undefined&&G.s[m].owner===f){toStage[m]=toStage[c]+1;q.push(m);}}}
+  if(st){toStage[st]=0;const q=[st];while(q.length){const c=q.shift();for(const m of ADJ[c])if(toStage[m]===undefined&&G.s[m].owner===f&&!blocksFor(gateOn(c,m),f)){toStage[m]=toStage[c]+1;q.push(m);}}}
   for(const s of shuffle(ownedBy(f))){ // spare troops go to the neighbour that most needs them, then to the gathering army, then toward the front
     const free=aiFree(s,f);if(!free.length)continue;
-    const nb=ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner===f&&t.units.length<MAX_UNITS);
+    const nb=ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner===f&&t.units.length<MAX_UNITS&&!blocksFor(gateOn(s.id,t.id),f)); // never through a rival's camp on the road
     let dest=null,dd=0;for(const t of nb){const g=gap(t);if(g>dd){dd=g;dest=t;}}
     if(!dest&&toStage[s.id]>0)dest=nb.filter(t=>toStage[t.id]<toStage[s.id])[0];
     if(!dest&&hd[s.id]>1)dest=nb.filter(t=>hd[t.id]<hd[s.id])[0];if(!dest)continue;
@@ -3590,14 +3616,15 @@ function econTick(f){
       if(f===PLAYER)report('🔥',`${sname(s)} revolted and declared itself free!`);}
   }
   for(const s of passStates()){ // armies in the field recover slowly, in a fort a little faster; builders finish; AI forts raise a militia to hold the road
-    if(s.owner!==f||!s.units.length)continue;
-    if(s.build){s.build.t--;if(s.build.t<=0){s.bld.walls=s.build.lv;if(f===PLAYER)report('🏰',`${FORT_NAME[s.build.lv]} completed at ${sname(s)}.`);s.build=null;}}
-    for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*(s.bld.walls?.1:.06)));
-    if(f!==PLAYER&&s.bld.walls&&s.units.length<2&&G.turn%3===0&&G.gold[f]>500){
+    if(s.owner!==f)continue;
+    if(s.units.length){ // work stops while nobody is there to do it
+      if(s.build){s.build.t--;if(s.build.t<=0){s.bld.walls=s.build.lv;if(f===PLAYER)report('🏰',`${FORT_NAME[s.build.lv]} completed at ${sname(s)}.`);s.build=null;}}
+      for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*(s.bld.walls?.1:.06)));}
+    if(f!==PLAYER&&s.bld.walls&&s.units.length<2&&G.turn%3===0&&G.gold[f]>500){ // an empty fort is manned again too
       const t=FACTIONS[f].roster.find(t=>{const T=UNITS[t];return(!T.req||T.req.lv===0)&&(T.kind==='inf'||T.kind==='spear');});
       if(t){G.gold[f]-=Math.round(UNITS[t].cost*.5);s.units.push(mkUnit(t,true));}}
   }
-  if(G.gold[f]<0){let worst=null,ws=null;for(const s of ownedBy(f))for(const u of s.units)if(u.type!=='general'&&(!worst||UNITS[u.type].upk>UNITS[worst.type].upk)){worst=u;ws=s;}
+  if(G.gold[f]<0){let worst=null,ws=null;for(const s of [...ownedBy(f),...heldPasses(f)])for(const u of s.units)if(u.type!=='general'&&(!worst||UNITS[u.type].upk>UNITS[worst.type].upk)){worst=u;ws=s;}
     if(worst){ws.units=ws.units.filter(u=>u!==worst);if(f===PLAYER)report('💰',`Unpaid, the ${UNITS[worst.type].name} in ${sname(ws)} deserted. Keep the treasury above zero.`);}}
 }
 function rebelTick(){for(const s of ownedBy('rebels')){s.pop=Math.round(s.pop*1.006);
