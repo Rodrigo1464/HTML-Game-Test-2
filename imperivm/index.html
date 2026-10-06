@@ -91,6 +91,9 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .node .hit{fill:transparent}
 .node .town{fill:#f6edd6;stroke-width:3.5}
 .node .walls{fill:none;stroke:#3d2c1a;stroke-width:2;stroke-dasharray:3 2}
+.node .zoc{opacity:.2;pointer-events:none}
+.node .lbl.pl{font-size:9.5px}
+.node.pass .town{stroke-width:2.6}
 .node .lbl{font-family:var(--display);font-weight:700;font-size:11.5px;fill:#26180c;text-anchor:middle;paint-order:stroke;stroke:#f2e6c8;stroke-width:3.2px;stroke-linejoin:round;letter-spacing:.03em}
 .node .sel-ring{fill:none;stroke:#f4cd5c;stroke-width:3;animation:pulse 1.2s ease-in-out infinite}
 .node .tgt-ring{fill:rgba(240,200,90,.2);stroke:#f0c75a;stroke-width:2.5;stroke-dasharray:4 3}
@@ -122,6 +125,7 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .clab .cb.ready{outline:2px solid #f4cd5c}
 .clab .cs{font-size:11px}
 .clab.foe{border-color:#e2553f}
+.clab.pass{padding:0 6px;font-size:10.5px;background:rgba(236,226,200,.9)}
 .busy.pill{inset:auto;top:62px;left:50%;right:auto;transform:translateX(-50%);flex-direction:row;gap:10px;padding:8px 16px;border-radius:999px;background:rgba(26,18,11,.92);border:1px solid var(--hud-line);font-size:13px;white-space:nowrap;pointer-events:none}
 .busy.pill .spin{width:18px;height:18px;border-width:2px}
 
@@ -775,6 +779,39 @@ const ADJ={};NODES.forEach(n=>ADJ[n.id]=[]);
 EDGES.forEach(([a,b])=>{ADJ[a].push(b);ADJ[b].push(a);});
 const DIST={};
 for(const n of NODES){const d={[n.id]:0},q=[n.id];while(q.length){const c=q.shift();for(const m of ADJ[c])if(d[m]===undefined){d[m]=d[c]+1;q.push(m);}}DIST[n.id]=d;}
+const EDGE_CTRL={}; // the bend of every road, so that roads, marches and the passes standing on them agree
+EDGES.forEach(([a,b],i)=>{const A=NODE[a],B=NODE[b],mx=(A.x+B.x)/2,my=(A.y+B.y)/2,dx=B.x-A.x,dy=B.y-A.y,len=Math.hypot(dx,dy)||1,bend=(i%2?1:-1)*len*.07;
+  EDGE_CTRL[a+'|'+b]=EDGE_CTRL[b+'|'+a]=[mx-dy/len*bend,my+dx/len*bend];});
+
+/* ================= PASSES & FORTS: stopping points on the roads ================= */
+// Cities keep their own adjacency (ADJ). A pass sits on one road between two cities: an army can camp there, and a garrisoned pass or fort closes the road — enemies must break it before they can march through.
+const PDEF=[ // id, name, [city a, city b], where on the road (0 = at a, 1 = at b), battlefield, fort level (0 none, 1 timber, 2 stone), owner, garrison
+ ['carseoli','Carseoli Pass',['roma','corfinium'],.5,'pass',1,'samnium',['sm_levy','sm_jav']],
+ ['furculae','Caudine Forks',['capua','beneventum'],.5,'pass',0,null,[]],
+ ['intercisa','Intercisa Gorge',['ariminum','asculum'],.5,'pass',0,null,[]],
+ ['casentino','Casentino Pass',['clusium','ariminum'],.5,'pass',0,null,[]],
+ ['pistoria','Pistoria Pass',['pisae','bononia'],.5,'pass',1,'etruria',['et_levy','et_skirm']],
+ ['clastidium','Clastidium',['genua','mediolanum'],.5,'plain',1,'gauls',['ga_war','ga_skirm']],
+ ['luni','Luni Gap',['pisae','genua'],.5,'pass',0,null,[]],
+ ['lucanian','Lucanian Gap',['beneventum','tarentum'],.5,'hills',0,null,[]],
+ ['apulian','Apulian Gate',['corfinium','luceria'],.5,'hills',0,null,[]],
+ ['siris','Heraclea on the Siris',['tarentum','croton'],.5,'plain',0,null,[]],
+ ['aspromonte','Aspromonte Road',['croton','rhegium'],.5,'pass',0,null,[]],
+ ['nebrodi','Nebrodi Pass',['messana','panormus'],.5,'pass',0,null,[]],
+ ['selinus','Selinus Fort',['lilybaeum','akragas'],.5,'plain',2,'carthage',['ca_libyan','ca_sling']],
+ ['gela','Gela Plain',['akragas','syracusae'],.5,'plain',0,null,[]],
+ ['etna','Etna Road',['messana','syracusae'],.5,'forest',0,null,[]],
+ ['mincio','Mincio Fords',['mediolanum','patavium'],.5,'plain',0,null,[]]
+];
+const PNODES=[],PNODE={},EDGE_PASS={},CPASS={};NODES.forEach(n=>{CPASS[n.id]=[];n.z=n.y;});
+PDEF.forEach(([id,name,[a,b],t,land,fort,owner,garrison],k)=>{
+  const A=NODE[a],B=NODE[b],c=EDGE_CTRL[a+'|'+b],u=1-t,x=u*u*A.x+2*u*t*c[0]+t*t*B.x,y=u*u*A.y+2*u*t*c[1]+t*t*B.y;
+  const dx=2*u*(c[0]-A.x)+2*t*(B.x-c[0]),dy=2*u*(c[1]-A.y)+2*t*(B.y-c[1]),l=Math.hypot(dx,dy)||1;
+  const n={id,name,x,y,z:y,pass:true,a,b,t,land,fort,owner,garrison,k,i:-1,ux:-dy/l,uz:dx/l}; // ux, uz: the spot beside the road where its army stands
+  PNODES.push(n);PNODE[id]=n;NODE[id]=n;ADJ[id]=[a,b];EDGE_PASS[a+'|'+b]=EDGE_PASS[b+'|'+a]=id;CPASS[a].push(id);CPASS[b].push(id);
+});
+const ALLN=[...NODES,...PNODES];
+const moveTargets=id=>PNODE[id]?ADJ[id]:[...ADJ[id],...CPASS[id]]; // everything an army in this city or pass can march to in one turn
 
 /* ================= BUILDINGS ================= */
 const BUILD={
@@ -794,7 +831,10 @@ const TAX_MUL=[0.75,1,1.25,1.5], TAX_ORDER=[10,0,-12,-25], TAX_GROW=[0.4,0,-0.4,
 let G=null;
 const SAVE_KEY='imperivm.save.v1';
 function mkUnit(type,moved){return{uid:G.seq++,type,men:UNITS[type].men,xp:0,moved:!!moved};}
-function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);} // saves from before faction choice were always Rome
+function mkPass(p){ // a pass is kept like a city so that armies, battles and saves treat it the same; owner is null while nobody holds it
+  return{id:p.id,pass:true,owner:p.owner,pop:0,tax:1,bld:{farms:0,market:0,temple:0,barracks:0,stables:0,walls:p.fort},build:null,units:p.garrison.map(t=>mkUnit(t,false)),unrest:0,rec:0};
+}
+function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);for(const p of PNODES)if(!G.s[p.id])G.s[p.id]=mkPass(p);} // saves from before faction choice were always Rome, and from before passes had none
 function newGame(fid){
   setPlayer(fid);
   G={v:1,player:PLAYER,turn:1,seq:1,gold:{},cap:{},s:{},reports:[],last:[],won:false,lost:false};
@@ -803,7 +843,23 @@ function newGame(fid){
     G.s[id]={id,owner,pop,tax:1,bld:Object.assign({farms:0,market:0,temple:0,barracks:0,stables:0,walls:0},bld),build:null,units:[],unrest:0,rec:0};
     G.s[id].units=units.map(t=>mkUnit(t,false));
   }
+  for(const p of PNODES)G.s[p.id]=mkPass(p);
 }
+const passStates=()=>PNODES.map(p=>G.s[p.id]);
+const heldPasses=f=>passStates().filter(s=>s.owner===f&&s.units.length);
+function tidyPasses(){for(const s of passStates())if(!s.units.length&&!s.bld.walls)s.owner=null;} // nobody holds a bare pass once its army has left
+const gateOn=(a,b)=>{const id=EDGE_PASS[a+'|'+b];return id?G.s[id]:null;};
+const blocksFor=(gate,fid)=>!!(gate&&gate.units.length&&gate.owner!==fid); // an enemy-held pass shuts the road to fid's armies
+const FORT_NAME=['','Timber fort','Stone fort'],FORT_COST=[0,500,1100],FORT_TURNS=[0,2,3],LAND_NAME={pass:'Mountain pass',plain:'Open plain',hills:'Rolling hills',forest:'Forest road'};
+function segCurve(f,t){ // the quadratic curve an army walks from node f to node t (a city or a pass); a pass cuts its road in two
+  const pf=PNODE[f],pt=PNODE[t];
+  if(!pf&&!pt){const A=NODE[f],B=NODE[t],c=EDGE_CTRL[f+'|'+t];return{x0:A.x,z0:A.y,x1:B.x,z1:B.y,cx:c[0],cz:c[1]};}
+  const p=pf||pt,city=pf?t:f,A=NODE[p.a],B=NODE[p.b],c=EDGE_CTRL[p.a+'|'+p.b];
+  const lo=city===p.a?0:p.t,hi=city===p.a?p.t:1,q=s=>{const u=1-s;return[u*u*A.x+2*u*s*c[0]+s*s*B.x,u*u*A.y+2*u*s*c[1]+s*s*B.y];};
+  const P0=q(lo),P1=q(hi),k=hi-lo,cx=P0[0]+k*((1-lo)*(c[0]-A.x)+lo*(B.x-c[0])),cz=P0[1]+k*((1-lo)*(c[1]-A.y)+lo*(B.y-c[1]));
+  return(f===city)===(city===p.a)?{x0:P0[0],z0:P0[1],x1:P1[0],z1:P1[1],cx,cz}:{x0:P1[0],z0:P1[1],x1:P0[0],z1:P0[1],cx,cz};
+}
+const isFoeTarget=id=>{const s=G.s[id];return s.pass?s.units.length>0&&s.owner!==PLAYER:s.owner!==PLAYER;};
 function save(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(G));}catch(e){}}
 function loadSave(){try{const t=localStorage.getItem(SAVE_KEY);if(t){const g=JSON.parse(t);if(g&&g.v===1&&g.s)return g;}}catch(e){}return null;}
 
@@ -826,11 +882,11 @@ function incomeParts(s){
 const income=s=>incomeParts(s).total;
 function growth(s){let g=0.8+s.bld.farms*0.6+TAX_GROW[s.tax];if(order(s)<40)g=Math.min(g,0);return g;}
 const upkeepOf=units=>units.reduce((a,u)=>a+UNITS[u.type].upk,0);
-const upkeep=f=>ownedBy(f).reduce((a,s)=>a+upkeepOf(s.units),0);
+const upkeep=f=>ownedBy(f).reduce((a,s)=>a+upkeepOf(s.units),0)+heldPasses(f).reduce((a,s)=>a+upkeepOf(s.units),0);
 const grossIncome=f=>ownedBy(f).reduce((a,s)=>a+income(s),0);
 const netIncome=f=>grossIncome(f)-upkeep(f);
 const canRecruit=(s,t)=>{const r=UNITS[t].req;return !r||s.bld[r.b]>=r.lv;};
-const countGenerals=f=>ownedBy(f).reduce((a,s)=>a+s.units.filter(u=>u.type==='general').length,0);
+const countGenerals=f=>[...ownedBy(f),...heldPasses(f)].reduce((a,s)=>a+s.units.filter(u=>u.type==='general').length,0);
 function unitPower(u){const T=UNITS[u.type];return u.men*T.w*(T.atk+T.def+T.ratk*0.6+(u.xp||0)*2+T.charge*0.3)*(0.6+T.mor/200)/10;}
 const armyPower=us=>us.reduce((a,u)=>a+unitPower(u),0);
 const sumMen=us=>us.reduce((a,u)=>a+u.men,0);
@@ -928,20 +984,32 @@ function drawMap(){
 function repaintTerritory(){if(CM.on)cmTerrTex();else{paintTerritory();drawMap();}}
 
 /* ================= SVG MAP LAYER ================= */
-const EDGE_CTRL={};
 function buildRoads(){
   let h='';
-  EDGES.forEach(([a,b,sea],i)=>{const A=NODE[a],B=NODE[b];const mx=(A.x+B.x)/2,my=(A.y+B.y)/2,dx=B.x-A.x,dy=B.y-A.y,len=Math.hypot(dx,dy)||1;
-    const bend=(i%2?1:-1)*len*.07,cx=mx-dy/len*bend,cy=my+dx/len*bend;EDGE_CTRL[a+'|'+b]=EDGE_CTRL[b+'|'+a]=[cx,cy];
+  EDGES.forEach(([a,b,sea])=>{const A=NODE[a],B=NODE[b],[cx,cy]=EDGE_CTRL[a+'|'+b];
     h+=`<path class="${sea?'sea-route':'road'}" d="M${A.x.toFixed(1)},${A.y.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${B.x.toFixed(1)},${B.y.toFixed(1)}"/>`;});
   $('#lRoads').innerHTML=h;$('#mapSvg').setAttribute('viewBox',`0 0 ${MW} ${MH}`);
 }
 const starPath=(cx,cy,r)=>{let p='';for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,rr=i%2?r*.45:r;p+=(i?'L':'M')+(cx+rr*Math.cos(a)).toFixed(1)+','+(cy+rr*Math.sin(a)).toFixed(1);}return p+'Z';};
 function renderNodes(){
   if(CM.on)return cmSync();
-  const mv=UI.move,adj=mv?new Set(ADJ[mv.from]):null;let routes='',h='';
-  if(mv)for(const id of ADJ[mv.from]){const A=NODE[mv.from],B=NODE[id],c=EDGE_CTRL[mv.from+'|'+id];
-    routes+=`<path class="route-hl${G.s[id].owner!==PLAYER?' foe':''}" d="M${A.x},${A.y} Q${c[0]},${c[1]} ${B.x},${B.y}"/>`;}
+  tidyPasses();
+  const mv=UI.move,adj=mv?new Set(moveTargets(mv.from)):null;let routes='',h='';
+  if(mv)for(const id of moveTargets(mv.from)){const c=segCurve(mv.from,id);
+    routes+=`<path class="route-hl${isFoeTarget(id)?' foe':''}" d="M${c.x0},${c.z0} Q${c.cx},${c.cz} ${c.x1},${c.z1}"/>`;}
+  for(const n of PNODES){ // passes and forts: a diamond on the road, a flag colour for whoever holds it
+    const s=G.s[n.id],col=s.owner?FACTIONS[s.owner].color:'#9a9486',isT=adj&&adj.has(n.id),fort=s.bld.walls;
+    h+=`<g class="node pass${isT&&isFoeTarget(n.id)?' foe':''}" data-id="${n.id}" transform="translate(${n.x.toFixed(1)},${n.y.toFixed(1)})"><circle class="hit" r="20"/>`;
+    if(isT)h+=`<circle class="tgt-ring" r="16"/>`;
+    if(UI.sel===n.id||(mv&&mv.from===n.id))h+=`<circle class="sel-ring" r="15"/>`;
+    if(s.units.length)h+=`<circle class="zoc" r="26" style="fill:${col}"/>`;
+    h+=`<rect class="town" x="-6" y="-6" width="12" height="12" transform="rotate(45)" style="stroke:${col}"/>`;
+    if(fort)h+=`<rect class="walls" x="-9.5" y="-9.5" width="19" height="19" transform="rotate(45)"/>`;
+    h+=`<circle r="2.6" fill="${col}"/>${s.units.length||fort||isT||UI.sel===n.id?`<text class="lbl pl" y="19">${n.name}</text>`:''}`; // bare passes are named only when they matter, to keep the map clear
+    if(s.units.length){const ready=s.owner===PLAYER&&s.units.some(u=>!u.moved);
+      h+=`<g class="badge${ready?' ready':''}" transform="translate(13,-9)"><rect x="-9" y="-8" width="18" height="16" rx="3" fill="${col}"/><text y="4">${s.units.length}</text></g>`;}
+    if(s.build&&s.owner===PLAYER)h+=`<text x="-20" y="-6" font-size="12">🔨</text>`;
+    h+='</g>';}
   for(const n of NODES){
     const s=G.s[n.id],F=FACTIONS[s.owner],r=6+tier(s)*2,isT=adj&&adj.has(n.id);
     h+=`<g class="node${isT&&s.owner!==PLAYER?' foe':''}" data-id="${n.id}" transform="translate(${n.x.toFixed(1)},${n.y.toFixed(1)})"><circle class="hit" r="24"/>`;
@@ -1010,8 +1078,42 @@ function unitCard(u,fid,opt={}){
   const cls=['ucard',opt.pick?'pick':'',opt.dim?'dim':''].join(' ');
   return`<button class="${cls}" data-uid="${u.uid}" ${opt.disabled?'disabled':''}>${symSvg(T.kind,FACTIONS[fid].color,36)}<div class="main"><div class="uname">${T.name} ${xpStars(u.xp)}</div><div class="umeta">${u.men}/${T.men} · ${opt.tag||KIND_NAME[T.kind]}</div><div class="ubar"><i style="width:${pct}%;background:${pct<40?'var(--bad)':pct<75?'var(--warn)':'var(--good)'}"></i></div></div></button>`;
 }
+function renderPassSheet(s){
+  const n=NODE[s.id],held=s.units.length>0,mine=held&&s.owner===PLAYER,F=s.owner&&(held||s.bld.walls)?FACTIONS[s.owner]:null,fort=s.bld.walls;
+  let h=`<div class="sh-head"><div class="sh-flag" style="background:${F?F.color:'#9a9486'}"></div><div><h3>${n.name}</h3><div class="sh-sub">${fort?FORT_NAME[fort]:LAND_NAME[n.land]} on the road ${NODE[n.a].name} – ${NODE[n.b].name}${F?' · '+F.name:''}</div></div><button class="sh-x" id="shX" aria-label="Close">×</button></div>`;
+  h+=`<div class="chips"><span class="chip">${LAND_NAME[n.land]}</span>${fort?`<span class="chip">${BUILD.walls.lv[fort-1]}</span>`:''}<span class="chip">${held?`${s.units.length} units · ${fmt(sumMen(s.units))} men`:'Nobody holds it'}</span></div>`;
+  if(mine){
+    let fh='';
+    if(s.build)fh=`<div class="row"><div class="ico">🔨</div><div class="main"><div class="t">Building a ${FORT_NAME[s.build.lv].toLowerCase()}</div><div class="d">${s.build.t} turn${s.build.t>1?'s':''} left</div></div></div>`;
+    else if(fort<2){const cost=FORT_COST[fort+1];fh=`<div class="row"><div class="ico">🏰</div><div class="main"><div class="t">${fort?'Upgrade to a':'Build a'} ${FORT_NAME[fort+1].toLowerCase()}</div><div class="d">${fmt(cost)} gold · ${FORT_TURNS[fort+1]} turns · defenders fight much harder behind walls</div></div><button class="btn gold sm" data-fort="1" ${G.gold[PLAYER]<cost?'disabled':''}>Build</button></div>`;}
+    const n2=UI.pick.size;
+    h+=`<div class="sh-body"><div class="note">While your army holds this pass, the road is closed: an enemy must defeat you here before he can march through. Select units to march them to either end of the road.</div><div class="ugrid">${s.units.map(u=>unitCard(u,PLAYER,{pick:UI.pick.has(u.uid),dim:u.moved,tag:u.moved?'Done this turn':null})).join('')}</div><div style="margin-top:10px">${fh}</div></div>`;
+    h+=`<div class="sh-foot"><button class="btn ghost sm" id="pkAll">All</button><button class="btn ghost sm" id="pkDis" ${n2===1?'':'disabled'}>Disband</button><button class="btn primary grow" id="pkMarch" ${n2?'':'disabled'}>March ${n2?n2+' unit'+(n2>1?'s':''):''}</button></div>`;
+  }else{
+    h+=`<div class="sh-body">${held?`<div class="ugrid">${s.units.map(u=>unitCard(u,s.owner,{disabled:true})).join('')}</div>`:`<div class="note">${fort?'An empty fort. Any army that marches in takes it.':'An empty pass. An army that camps here closes the road to its enemies.'}</div>`}`;
+    const from=ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner===PLAYER&&t.units.some(u=>!u.moved));
+    if(from.length)h+=`<div class="note" style="margin-top:10px">${held?'Attack from':'Camp here from'} a neighbouring city:</div>`+from.map(t=>{const av=t.units.filter(u=>!u.moved);
+      return`<div class="row"><div class="ico">${held?'⚔️':'⛺'}</div><div class="main"><div class="t">${sname(t)}</div><div class="d">${av.length} ready units · ${fmt(sumMen(av))} men</div></div><button class="btn primary sm" data-atk="${t.id}">${held?'Attack':'March'}</button></div>`;}).join('');
+    else h+=`<div class="note" style="margin-top:10px">${ADJ[s.id].some(id=>G.s[id].owner===PLAYER)?'Your armies next to it have already marched this turn.':'Neither end of this road is yours yet.'}</div>`;
+    h+='</div>';
+  }
+  const sh=$('#sheet');sh.innerHTML=h;
+  $('#shX').onclick=closeSheet;
+  sh.querySelectorAll('[data-atk]').forEach(b=>b.onclick=()=>{const from=G.s[b.dataset.atk];UI.move={from:from.id,uids:from.units.filter(u=>!u.moved).map(u=>u.uid)};executeMove(s.id);});
+  if(!mine)return;
+  sh.querySelectorAll('.ucard[data-uid]').forEach(b=>b.onclick=()=>{const uid=+b.dataset.uid;const u=s.units.find(x=>x.uid===uid);if(!u||u.moved)return;UI.pick.has(uid)?UI.pick.delete(uid):UI.pick.add(uid);renderSheet();});
+  const all=$('#pkAll');if(all)all.onclick=()=>{const av=s.units.filter(u=>!u.moved);UI.pick=UI.pick.size===av.length?new Set():new Set(av.map(u=>u.uid));renderSheet();};
+  const mar=$('#pkMarch');if(mar)mar.onclick=()=>startMove(s.id,[...UI.pick]);
+  const dis=$('#pkDis');if(dis)dis.onclick=async()=>{const uid=[...UI.pick][0],u=s.units.find(x=>x.uid===uid);if(!u)return;
+    const ok=await modal({title:'Disband unit?',body:`<p>${UNITS[u.type].name} will be sent home. You save ${UNITS[u.type].upk} gold upkeep per turn.</p>`,buttons:[{label:'Disband',value:1,cls:'primary'},{label:'Keep',value:0}]});
+    if(ok){s.units=s.units.filter(x=>x!==u);UI.pick.delete(uid);save();render();}};
+  const fb=sh.querySelector('[data-fort]');if(fb)fb.onclick=()=>doFort(s);
+}
+function doFort(s){const lv=s.bld.walls+1,c=FORT_COST[lv];if(s.build||lv>2||G.gold[PLAYER]<c||!s.units.length)return;
+  G.gold[PLAYER]-=c;s.build={lv,t:FORT_TURNS[lv]};toast(`Construction started: ${FORT_NAME[lv]} at ${sname(s)}`);AU.ui('hammer');save();render();}
 function renderSheet(){
   const s=G.s[UI.sel];if(!s)return closeSheet();
+  if(s.pass)return renderPassSheet(s);
   const F=FACTIONS[s.owner],mine=s.owner===PLAYER,o=order(s);
   let h=`<div class="sh-head"><div class="sh-flag" style="background:${F.color}"></div><div><h3>${sname(s)}</h3><div class="sh-sub">${F.name} · ${tierName(s)} of ${fmt(s.pop)}</div></div><button class="sh-x" id="shX" aria-label="Close">×</button></div>`;
   if(mine){
@@ -1029,7 +1131,8 @@ function renderSheet(){
     h+=`<div class="sh-body">${s.units.length?`<div class="ugrid">${s.units.map(u=>unitCard(u,s.owner,{disabled:true})).join('')}</div>`:'<div class="note">The city is undefended. Any army that marches in takes it.</div>'}`;
     const from=ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner===PLAYER&&t.units.some(u=>!u.moved));
     if(from.length){h+=`<div class="note" style="margin-top:10px">Attack from a neighbouring city:</div>`+from.map(t=>{const av=t.units.filter(u=>!u.moved);
-      return`<div class="row"><div class="ico">⚔️</div><div class="main"><div class="t">${sname(t)}</div><div class="d">${av.length} ready units · ${fmt(sumMen(av))} men</div></div><button class="btn primary sm" data-atk="${t.id}">Attack</button></div>`;}).join('');}
+      const g=gateOn(t.id,s.id),blk=blocksFor(g,PLAYER);
+      return`<div class="row"><div class="ico">⚔️</div><div class="main"><div class="t">${sname(t)}</div><div class="d">${av.length} ready units · ${fmt(sumMen(av))} men</div>${blk?`<div class="d neg">${sname(g)} is held — you fight there first</div>`:''}</div><button class="btn primary sm" data-atk="${t.id}">${blk?'Advance':'Attack'}</button></div>`;}).join('');}
     else if(ADJ[s.id].some(id=>G.s[id].owner===PLAYER))h+=`<div class="note" style="margin-top:10px">Your neighbouring armies have already marched this turn.</div>`;
     else h+=`<div class="note" style="margin-top:10px">Not next to any of your cities yet.</div>`;
     h+='</div>';
@@ -1051,7 +1154,7 @@ function renderSheet(){
 }
 function tabArmy(s){
   if(!s.units.length)return'<div class="note">No troops here. Recruit units, or march an army in from a neighbouring city.</div>';
-  return`<div class="note">Tap units to select them, then march to a neighbouring city. Each army marches once per turn.</div><div class="ugrid">${s.units.map(u=>unitCard(u,PLAYER,{pick:UI.pick.has(u.uid),dim:u.moved,tag:u.moved?'Done this turn':null})).join('')}</div>`;
+  return`<div class="note">Tap units to select them, then march to a neighbouring city, or camp on a pass along the road. Each army marches once per turn.</div><div class="ugrid">${s.units.map(u=>unitCard(u,PLAYER,{pick:UI.pick.has(u.uid),dim:u.moved,tag:u.moved?'Done this turn':null})).join('')}</div>`;
 }
 function tabBuild(s){
   let h=s.build?`<div class="note">🔨 Building <b>${BUILD[s.build.k].lv[s.bld[s.build.k]]}</b> — ${s.build.t} turn${s.build.t>1?'s':''} left. One project at a time.</div>`:`<div class="note">A ${tierName(s).toLowerCase()} can build up to level ${tier(s)}. Cities grow past 2,000 and 6,000 people to unlock more.</div>`;
@@ -1092,7 +1195,7 @@ function doRecruit(s,t){const T=UNITS[t];
 /* ================= MOVEMENT ================= */
 function startMove(from,uids){
   if(!uids.length)return;UI.move={from,uids};closeSheet();
-  $('#hintTxt').textContent=`March ${uids.length} unit${uids.length>1?'s':''} from ${NODE[from].name} — tap a highlighted city`;
+  $('#hintTxt').textContent=`March ${uids.length} unit${uids.length>1?'s':''} from ${NODE[from].name} — tap a highlighted city or pass`;
   $('#hint').classList.remove('hidden');renderNodes();
 }
 function cancelMove(){UI.move=null;$('#hint').classList.add('hidden');renderNodes();}
@@ -1100,38 +1203,61 @@ async function onNode(id){
   if(UI.busy)return;
   if(UI.move){
     if(id===UI.move.from){const f=UI.move.from;cancelMove();openSheet(f);return;}
-    if(!ADJ[UI.move.from].includes(id)){toast('Armies march one city per turn — pick a highlighted city');return;}
+    if(!moveTargets(UI.move.from).includes(id)){toast('Armies march one stop per turn — pick a highlighted city or pass');return;}
     return executeMove(id);
   }
   openSheet(id);
 }
 async function executeMove(toId){
-  const from=G.s[UI.move.from],to=G.s[toId],units=from.units.filter(u=>UI.move.uids.includes(u.uid)&&!u.moved);
+  const from=G.s[UI.move.from],units=from.units.filter(u=>UI.move.uids.includes(u.uid)&&!u.moved);let to=G.s[toId];
   cancelMove();closeSheet();if(!units.length)return;AU.ui('march');
+  const gate=!from.pass&&!to.pass?gateOn(from.id,toId):null; // an enemy army holding a pass on the road stops the march there
+  if(blocksFor(gate,PLAYER)){to=gate;toast(`${sname(gate)} is held — your army must break through it first`);}
   if(to.owner===PLAYER){
     const n=Math.min(units.length,MAX_UNITS-to.units.length);if(n<=0)return toast(`${sname(to)} already holds 12 units`);
-    const mv=units.slice(0,n);UI.busy=true;try{await cmMarch(from.id,toId,PLAYER,mv);}finally{UI.busy=false;}from.units=from.units.filter(u=>!mv.includes(u));mv.forEach(u=>u.moved=true);to.units.push(...mv);
+    const mv=units.slice(0,n);UI.busy=true;try{await cmMarch(from.id,to.id,PLAYER,mv);}finally{UI.busy=false;}from.units=from.units.filter(u=>!mv.includes(u));mv.forEach(u=>u.moved=true);to.units.push(...mv);
     if(n<units.length)toast(`Only ${n} units fit in ${sname(to)}`);save();render();return;
   }
   UI.busy=true;
   try{
-    if(!to.units.length){await cmMarch(from.id,toId,PLAYER,units);from.units=from.units.filter(u=>!units.includes(u));await capture(to,PLAYER,units,from);}
+    if(!to.units.length){await cmMarch(from.id,to.id,PLAYER,units);from.units=from.units.filter(u=>!units.includes(u));await capture(to,PLAYER,units,from);}
     else{
-      const mode=await modal({title:`Battle for ${sname(to)}`,body:forcesBody(units,to.units,to.bld.walls,'Your army',FACTIONS[to.owner].name,true),
+      const rel=reliefFor(to,to.owner,from);
+      const mode=await modal({title:`Battle for ${sname(to)}`,body:forcesBody(units,to.units.concat(rel.flatMap(r=>r.units)),to.bld.walls,'Your army',FACTIONS[to.owner].name,true,reliefNote(rel,true)),
         buttons:[{label:'⚔ Command the battle',value:'command',cls:'primary'},{label:'Auto-resolve',value:'auto',cls:'ghost'},{label:'Cancel',value:'cancel',cls:'ghost'}]});
-      if(mode!=='cancel'){await cmMarch(from.id,toId,PLAYER,units);from.units=from.units.filter(u=>!units.includes(u));units.forEach(u=>u.moved=true);await doBattle({attFid:PLAYER,units,from,to,mode});}
+      if(mode!=='cancel'){await cmMarch(from.id,to.id,PLAYER,units);from.units=from.units.filter(u=>!units.includes(u));units.forEach(u=>u.moved=true);await doBattle({attFid:PLAYER,units,from,to,mode});}
     }
   }finally{UI.busy=false;}
   save();render();checkEnd();
 }
-function forcesBody(att,def,walls,attName,defName,playerAtt){
+/* Relief: friendly armies standing next to a battle march to join it. A city spares up to half its ready men (it keeps at least one unit); an army camped on a pass or in a fort comes whole. They arrive late — passes are quicker — and a hostile pass on the road holds them back. */
+const RELIEF_MAX=4;
+function reliefFor(to,defFid,from){
+  if(!to.units.length||!defFid||defFid==='rebels')return[];
+  const out=[];let left=RELIEF_MAX,k=0;
+  for(const id of moveTargets(to.id)){
+    const s=G.s[id];if(!s||s===from||s.owner!==defFid||!s.units.length||left<=0)continue;
+    if(!s.pass&&!to.pass&&blocksFor(gateOn(s.id,to.id),defFid))continue;
+    let av=s.units.filter(u=>!u.moved&&u.men>=UNITS[u.type].men*.4).sort((a,b)=>unitPower(b)-unitPower(a));
+    if(!s.pass||s.bld.walls)av=av.slice(0,Math.max(0,Math.min(av.length,s.units.length-1,s.pass?av.length:Math.floor(av.length/2))));
+    av=av.slice(0,left);if(!av.length)continue;
+    left-=av.length;out.push({src:s,units:av,delay:s.pass?40:75,rx:k++%2?1:-1});
+  }
+  return out;
+}
+function reliefNote(rel,foe){
+  if(!rel.length)return'';
+  const n=rel.reduce((a,r)=>a+r.units.length,0),at=rel.map(r=>sname(r.src)).join(' and ');
+  return foe?`The defenders expect ${n} more unit${n>1?'s':''} from ${at} as the battle goes on.`:`Relief: ${n} unit${n>1?'s':''} from ${at} will join the battle after the first clashes.`;
+}
+function forcesBody(att,def,walls,attName,defName,playerAtt,note){
   const ap=armyPower(att),dp=armyPower(def)*(1+.15*walls),ratio=playerAtt?ap/Math.max(1,dp):dp/Math.max(1,ap);
   const odds=ratio>1.6?['Overwhelming','good']:ratio>1.15?['Favourable','good']:ratio>.87?['Even','warn']:ratio>.6?['Unfavourable','bad']:['Desperate','bad'];
   const side=(us,nm)=>`<div class="side"><div class="nm">${nm}</div><div class="icons">${us.map(u=>symSvg(UNITS[u.type].kind,FACTIONS[ownerOfUnit(u)].color,20)).join('')}</div><div class="d">${us.length} units<br>${fmt(sumMen(us))} men</div></div>`;
-  return`<div class="vs">${side(att,attName)}<div class="vsx">VS</div>${side(def,defName)}</div><div class="odds ${odds[1]}">Your odds: <b>${odds[0]}</b>${walls?`<br>Defenders hold ${BUILD.walls.lv[walls-1]}`:''}</div>`;
+  return`<div class="vs">${side(att,attName)}<div class="vsx">VS</div>${side(def,defName)}</div><div class="odds ${odds[1]}">Your odds: <b>${odds[0]}</b>${walls?`<br>Defenders hold ${BUILD.walls.lv[walls-1]}`:''}${note?`<br><small>${note}</small>`:''}</div>`;
 }
 const unitOwner=new WeakMap();
-function ownerOfUnit(u){if(unitOwner.has(u))return unitOwner.get(u);for(const n of NODES)if(G.s[n.id].units.includes(u))return G.s[n.id].owner;return PLAYER;}
+function ownerOfUnit(u){if(unitOwner.has(u))return unitOwner.get(u);for(const n of ALLN)if(G.s[n.id].units.includes(u))return G.s[n.id].owner;return PLAYER;}
 
 /* ================= BATTLE RESOLUTION ================= */
 function autoResolve(att,def,walls){
@@ -1144,23 +1270,27 @@ function autoResolve(att,def,walls){
 }
 async function doBattle(o){
   const{attFid,units,from,to}=o,defFid=to.owner,defUnits=to.units.slice();
-  units.forEach(u=>unitOwner.set(u,attFid));defUnits.forEach(u=>unitOwner.set(u,defFid));
+  const rel=reliefFor(to,defFid,from),relUnits=rel.flatMap(r=>r.units),defAll=defUnits.concat(relUnits); // relief armies fight beside the garrison
+  units.forEach(u=>unitOwner.set(u,attFid));defAll.forEach(u=>unitOwner.set(u,defFid));
   const pInv=attFid===PLAYER||defFid===PLAYER,pAtt=attFid===PLAYER;let mode=o.mode;
-  const preA=sumMen(units),preD=sumMen(defUnits);
+  const preA=sumMen(units),preD=sumMen(defAll);
   if(pInv&&!mode){
     AU.ui('alarm');
-    mode=await modal({title:`${sname(to)} is under attack!`,body:`<p>The ${FACTIONS[attFid].adj} army marches from ${sname(from)}.</p>`+forcesBody(units,defUnits,to.bld.walls,FACTIONS[attFid].name,'Your garrison',false),
+    mode=await modal({title:`${sname(to)} is under attack!`,body:`<p>The ${FACTIONS[attFid].adj} army marches from ${sname(from)}.</p>`+forcesBody(units,defAll,to.bld.walls,FACTIONS[attFid].name,to.pass?'Your men there':'Your garrison',false,reliefNote(rel,false)),
       buttons:[{label:'⚔ Command the defence',value:'command',cls:'primary'},{label:'Auto-resolve',value:'auto',cls:'ghost'}]});
   }
   let attWon;
   if(pInv&&mode==='command'){
-    const res=await runBattle({title:`Battle of ${sname(to)}`,playerIsAttacker:pAtt,pUnits:pAtt?units:defUnits,eUnits:pAtt?defUnits:units,eFid:pAtt?defFid:attFid,walls:to.bld.walls});
+    const relArr=rel.flatMap(r=>r.units.map(cu=>({cu,delay:r.delay,rx:r.rx})));
+    const res=await runBattle({title:`${to.pass?'Battle at':'Battle of'} ${sname(to)}`,playerIsAttacker:pAtt,pUnits:pAtt?units:defUnits,eUnits:pAtt?defUnits:units,eFid:pAtt?defFid:attFid,walls:to.bld.walls,
+      field:!!to.pass&&!to.bld.walls,fort:!!to.pass&&!!to.bld.walls,land:to.pass?NODE[to.id].land:null,pRelief:pAtt?[]:relArr,eRelief:pAtt?relArr:[]});
     if(res)attWon=pAtt?res.winnerSide===0:res.winnerSide===1;
-    else{mode='auto';attWon=autoResolve(units,defUnits,to.bld.walls);}
-  }else attWon=autoResolve(units,defUnits,to.bld.walls);
+    else{mode='auto';attWon=autoResolve(units,defAll,to.bld.walls);}
+  }else attWon=autoResolve(units,defAll,to.bld.walls);
   const attAlive=units.filter(u=>u.men>0),defAlive=defUnits.filter(u=>u.men>0);
   if(attWon&&!attAlive.length)attWon=false;
-  const lostA=preA-sumMen(attAlive),lostD=preD-sumMen(defAlive);
+  const lostA=preA-sumMen(attAlive),lostD=preD-sumMen(defAll.filter(u=>u.men>0));
+  for(const r of rel){r.src.units=r.src.units.filter(u=>u.men>0);r.units.forEach(u=>{if(u.men>0)u.moved=true;});} // the dead are struck from their rolls; the rest go back to their posts spent
   if(pInv&&mode==='auto'){
     const won=pAtt?attWon:!attWon;AU.stinger(won?'victory':'defeat');
     await modal({title:won?'Victory':'Defeat',body:`<p>${won?(pAtt?`Your army has broken the defenders of ${sname(to)}.`:`The garrison of ${sname(to)} holds firm.`):(pAtt?`Your army was thrown back from ${sname(to)}.`:`${sname(to)} has fallen.`)}</p><p>${FACTIONS[PLAYER].adj} losses: <b>${fmt(pAtt?lostA:lostD)}</b> men<br>Enemy losses: <b>${fmt(pAtt?lostD:lostA)}</b> men</p>`,buttons:[{label:'Continue',value:1,cls:'primary'}]});
@@ -1179,7 +1309,18 @@ async function doBattle(o){
   }
   return attWon;
 }
+function takePass(to,fid,units,from){ // an army wins a pass or fort, or walks into an empty one, and stops there
+  const prev=to.owner,fort=to.bld.walls;if(fid===PLAYER)AU.ui('fanfare');
+  to.owner=fid;to.build=null;
+  const fit=units.slice(0,MAX_UNITS);fit.forEach(u=>u.moved=true);to.units=fit;
+  if(units.length>MAX_UNITS&&from&&from.owner===fid)from.units.push(...units.slice(MAX_UNITS));
+  if(fid===PLAYER)toast(`${sname(to)} is yours — the road is closed to your enemies`);
+  else if(prev===PLAYER)report('🏰',`${theF(fid,1)} took ${sname(to)} from you.`);
+  else if(prev&&prev!==fid&&fort)report('🏰',`${theF(fid,1)} took ${sname(to)} from ${theF(prev)}.`);
+  render();
+}
 async function capture(to,fid,units,from){
+  if(to.pass)return takePass(to,fid,units,from);
   const prev=to.owner;if(fid===PLAYER)AU.ui('fanfare');
   to.owner=fid;to.build=null;to.tax=1;to.unrest=30;to.rec=0;
   const fit=units.slice(0,MAX_UNITS);fit.forEach(u=>u.moved=true);to.units=fit;
@@ -1197,7 +1338,8 @@ async function capture(to,fid,units,from){
     else report('⚑',`${theF(fid,1)} took ${sname(to)} from ${prev==='rebels'?'its free people':theF(prev)}.`);
   }
   if(prev!=='rebels'&&prev!==PLAYER&&!ownedBy(prev).length){const sg=FACTIONS[prev].sg;
-    report('☠️',`${theF(prev,1)} ${sg?'has':'have'} been wiped out${fid===PLAYER?' by your armies':''}.`);if(fid===PLAYER)toast(`${theF(prev,1)} ${sg?'is':'are'} destroyed!`);}
+    report('☠️',`${theF(prev,1)} ${sg?'has':'have'} been wiped out${fid===PLAYER?' by your armies':''}.`);if(fid===PLAYER)toast(`${theF(prev,1)} ${sg?'is':'are'} destroyed!`);
+    for(const ps of passStates())if(ps.owner===prev){ps.units=[];ps.owner=null;ps.build=null;}} // their armies in the field and forts go with them
   render();
 }
 
@@ -1211,7 +1353,7 @@ function setZoom(z){
 function centerOn(id,smooth){if(CM.on)return cmCenterOn(id,smooth);const n=NODE[id],sc=$('#mapScroll');const left=n.x*UI.zoom-sc.clientWidth/2,top=n.y*UI.zoom-sc.clientHeight*.28;
   if(smooth&&sc.scrollTo)sc.scrollTo({left,top,behavior:'smooth'});else{sc.scrollLeft=left;sc.scrollTop=top;}}
 function nextArmy(){
-  const own=ownedBy(PLAYER).filter(s=>s.units.some(u=>!u.moved));
+  const own=[...ownedBy(PLAYER),...heldPasses(PLAYER)].filter(s=>s.units.some(u=>!u.moved));
   if(!own.length)return toast('Every army has marched. End the turn when ready.');
   UI.nextIdx=(UI.nextIdx+1)%own.length;const s=own[UI.nextIdx];centerOn(s.id,true);UI.tab='army';UI.sel=null;openSheet(s.id);
 }
@@ -1242,18 +1384,18 @@ const GQ={ // pixel ratio cap, shadow map size, grass tufts on the battlefield, 
 let gfx=window.matchMedia&&matchMedia('(pointer:coarse)').matches?'medium':'high';try{const v=localStorage.getItem(GFX_KEY);if(GFXS.includes(v))gfx=v;}catch(e){}
 const gfxPR=()=>Math.min(GQ[gfx].pr,window.devicePixelRatio||1);
 const GATES=[-62,0,62],GATE_W=20,AVE_W=20; // the town's three avenues run back from the gates (and sit in the same places when there are no walls)
-const STATE_NAME={ok:'Steady',waver:'Wavering',rout:'Routing',dead:'Destroyed',fled:'Fled'};
+const STATE_NAME={ok:'Steady',waver:'Wavering',rout:'Routing',dead:'Destroyed',fled:'Fled',reserve:'On the way'};
 
 let B=null;
 const R3={renderer:null,scene:null,raf:0};
-const onField=u=>u.state!=='dead'&&u.state!=='fled';
+const onField=u=>u.state!=='dead'&&u.state!=='fled'&&u.state!=='reserve'; // 'reserve': a relief army still marching to the field
 const active=u=>u.state==='ok'||u.state==='waver';
 const isCav=u=>u.kind==='cav'||u.kind==='gen';
 const big=u=>isCav(u)||u.kind==='eleph';
 const fwdV=a=>[Math.sin(a),Math.cos(a)],latV=a=>[Math.cos(a),-Math.sin(a)];
 function angDiff(a,b){let d=(b-a)%(2*Math.PI);if(d>Math.PI)d-=2*Math.PI;if(d<-Math.PI)d+=2*Math.PI;return d;}
 const unitById=id=>B.units.find(u=>u.uid===id);
-const sideMen=s=>B.units.filter(u=>u.side===s&&onField(u)).reduce((a,u)=>a+u.men,0);
+const sideMen=s=>B.units.filter(u=>u.side===s&&u.state!=='dead'&&u.state!=='fled').reduce((a,u)=>a+u.men,0);
 const homeFace=s=>s===0?Math.PI:0;
 const towardZ=s=>s===0?-1:1;
 const centroid=us=>({x:us.reduce((a,u)=>a+u.x,0)/us.length,z:us.reduce((a,u)=>a+u.z,0)/us.length});
@@ -1274,15 +1416,16 @@ function battleAudio(dt){ // fighting noise, hoofbeats and the music's intensity
 }
 
 function mkTerrain(defSide){
-  const R=mulberry32((Math.random()*1e9)|0),hills=[],woods=[];
-  for(let i=0,n=2+Math.floor(R()*3);i<n;i++)hills.push({x:(R()*2-1)*(FX-25),z:(R()*2-1)*(WALL_Z-12),r:22+R()*28,h:4+R()*7});
-  for(let i=0,n=2+Math.floor(R()*3);i<n;i++)woods.push({x:(R()*2-1)*(FX-18),z:(R()*2-1)*(WALL_Z-28),r:9+R()*12});
+  const R=mulberry32((Math.random()*1e9)|0),hills=[],woods=[],fl=B.field,land=B.land,zh=fl?FZ-24:WALL_Z-12,zw=fl?FZ-34:WALL_Z-28; // out in the open the whole field is country; the land kind of a pass shapes it
+  for(let i=0,n=2+Math.floor(R()*3)+(land==='hills'?2:0);i<n;i++)hills.push({x:(R()*2-1)*(FX-25),z:(R()*2-1)*zh,r:22+R()*28,h:4+R()*7+(land==='hills'?3:0)});
+  if(fl&&land==='pass')for(const sd of [-1,1])for(let k=0;k<2;k++)hills.push({x:sd*(62+R()*12),z:(k-.5)*84+(R()-.5)*24,r:32+R()*10,h:17+R()*6}); // steep ridges close in the road
+  for(let i=0,n=2+Math.floor(R()*3)+(land==='forest'?5:0);i<n;i++)woods.push({x:(R()*2-1)*(FX-18),z:(R()*2-1)*zw,r:9+R()*12+(land==='forest'?5:0)});
   return{hills,woods,ts:defSide===0?1:-1,s1:R()*6,s2:R()*6,R,rd:{x0:(R()-.5)*50,a:4+R()*9,f:.018+R()*.016,p:R()*6.28},gn:R()*50};
 }
 function roadX(zl){ // the cart track winds in from the attackers' edge and ends at the town's main gate (zl: distance toward the town)
-  const r=B.ter.rd,t=sstep(-FZ-170,WALL_Z,zl);return r.x0*(1-t)+r.a*Math.sin(zl*r.f+r.p)*(1-sstep(WALL_Z-50,WALL_Z,zl));
+  const r=B.ter.rd,E=B.field?FZ+170:WALL_Z,t=sstep(-FZ-170,E,zl);return r.x0*(1-t)+r.a*Math.sin(zl*r.f+r.p)*(1-sstep(E-50,E,zl)); // with no town the track runs on through the field
 }
-const onRoad=(x,z,w)=>{const zl=z*B.ter.ts;return zl<WALL_Z+2&&Math.abs(x-roadX(zl))<w;};
+const onRoad=(x,z,w)=>{const zl=z*B.ter.ts;return(B.field||zl<WALL_Z+2)&&Math.abs(x-roadX(zl))<w;};
 /* buildings are solid: one grid cell per world unit across the field, for single men (blk) and for whole formations (blkU, a little wider) */
 function unblock(x,z,grid,esc){ // the nearest open point to (x,z), or null when (x,z) is open already
   const W=2*FX,i=Math.floor(x+FX),j=Math.floor(z+FZ);if(i<0||j<0||i>=W||j>=2*FZ)return null;
@@ -1306,17 +1449,18 @@ function mkBlock(){
 }
 function openDest(d){if(d&&B.blkU){const e=unblock(d.x,d.z,B.blkU,B.escU);if(e){d.x=e[0];d.z=e[1];}}return d;}
 function mkTown(){ // the town behind the square: three avenues run back from the gates, blocks of houses between them, and a temple and a colonnade facing the square
-  const R=mulberry32((Math.random()*1e9)|0),ts=B.ter.ts,houses=[],obs=[],cyp=[],skip=B.walls?.07:.3;
-  const temple={x:31,z:TOWN_Z+11.5,w:22,d:19},stoa=B.walls?{x:-31,z:TOWN_Z+4.5,w:38,d:7}:null;
+  if(B.field)return{houses:[],obs:[],cyp:[],temple:null,stoa:null}; // an army met on the road: no town at all
+  const R=mulberry32((Math.random()*1e9)|0),ts=B.ter.ts,houses=[],obs=[],cyp=[],skip=B.fort?.62:B.walls?.07:.3; // a fort is a small compound of barracks round a keep
+  const temple=B.fort?{x:0,z:TOWN_Z+16,w:18,d:18,keep:1}:{x:31,z:TOWN_Z+11.5,w:22,d:19},stoa=B.walls&&!B.fort?{x:-31,z:TOWN_Z+4.5,w:38,d:7}:null;
   const box=(x,z,w,d)=>obs.push([x-w/2,x+w/2,z-d/2,z+d/2]);box(temple.x,temple.z,temple.w,temple.d);if(stoa)box(stoa.x,stoa.z,stoa.w,stoa.d);
   const free=(x0,x1,z0,z1)=>!obs.some(o=>x0<o[1]+.8&&x1>o[0]-.8&&z0<o[3]+.8&&z1>o[2]-.8);
   const blocks=[[-FX-34,GATES[0]-AVE_W/2],[GATES[0]+AVE_W/2,GATES[1]-AVE_W/2],[GATES[1]+AVE_W/2,GATES[2]-AVE_W/2],[GATES[2]+AVE_W/2,FX+34]];
   const PL=[0xe8dcc0,0xdcc69c,0xcfb68c,0xe2d3b4,0xd9c2a0,0xefe5cf],TL=[0xa4553a,0x9a4a32,0xb0613f,0x8f4430,0xb86e48];
-  for(const [bx0,bx1] of blocks)for(let z=TOWN_Z+1.5;z<FZ+40;){
+  for(const [bx0,bx1] of blocks)for(let z=TOWN_Z+1.5;z<(B.fort?TOWN_Z+34:FZ+40);){
     const d=6+R()*3.5;if(z>136&&z<146){z=146;continue;} // a cross street
     for(let x=bx0;x<bx1-3.5;){let w=5.5+R()*4;if(bx1-(x+w)<3.5)w=bx1-x;
       const x0=x+.6,x1=x+w-.6,z0=z+.6,z1=z+d-.6;x+=w;
-      if(!free(x0,x1,z0,z1))continue;
+      if(!free(x0,x1,z0,z1)||(B.fort&&(x0<-78||x1>78)))continue;
       if(R()<skip){if(R()<.5){const cx=(x0+x1)/2,cz=(z0+z1)/2;cyp.push([cx,cz,.8+R()*.5]);obs.push([cx-.7,cx+.7,cz-.7,cz+.7]);}continue;} // a garden with a cypress
       const st=R()<.16&&z>TOWN_Z+10?3:R()<.45?2:1,h=st===3?7.5+R()*2:st===2?5+R()*1.5:3+R()*1.2,side=Math.abs(x0-.6-bx0)<.01?-1:Math.abs(x1+.6-bx1)<.01?1:0;
       const ry=z<TOWN_Z+3?(ts===1?Math.PI:0):side?side*Math.PI/2:[0,Math.PI,Math.PI/2,-Math.PI/2][Math.floor(R()*4)]; // front door on the square, else on the avenue
@@ -1328,11 +1472,11 @@ function mkTown(){ // the town behind the square: three avenues run back from th
 function heightAt(x,z){
   const T=B.ter;let h=Math.sin(x*.045+T.s1)*Math.cos(z*.038+T.s2)*1.1+Math.sin(x*.11+z*.07)*.35;
   for(const H of T.hills){const d2=((x-H.x)**2+(z-H.z)**2)/(H.r*H.r);if(d2<5)h+=H.h*Math.exp(-d2*1.6);}
-  const tz=z*T.ts-(WALL_Z-10);if(tz>0){const k=Math.min(1,tz/9);h=h*(1-k)+.2*k;}
+  if(!B.field){const tz=z*T.ts-(WALL_Z-10);if(tz>0){const k=Math.min(1,tz/9);h=h*(1-k)+.2*k;}}
   return h;
 }
 const forestAt=(x,z)=>B.ter.woods.some(W=>(x-W.x)**2+(z-W.z)**2<W.r*W.r);
-const inTown=u=>u.z*B.ter.ts>WALL_Z;
+const inTown=u=>!B.field&&u.z*B.ter.ts>WALL_Z;
 const atGate=x=>GATES.some(g=>Math.abs(x-g)<GATE_W/2);
 function wallWaypoint(u,tx,tz){ // armies cross the walls only through the gates
   if(!B.walls)return null;const wz=WALL_Z*B.ter.ts,s1=Math.sign(u.z-wz);
@@ -1353,6 +1497,9 @@ function mkBU(cu,side,fid){
     sc:.94+Math.random()*.12,wp:Math.random()*6.28,wa:0,g:0,sw:-1,swk:null,wait:0,cd:Math.random()*1.5,foe:null,hit:0,kv:0,kx:0,kz:0,die:null,roll:1,air:false,ay:0,vx:0,vy:0,vz:0});
   u.alive=u.figs.slice();u.dm=dims(u);u.wk=WEAP(u);
   return u;
+}
+function mkRelief(r,side,fid){ // a relief army starts off the field, unseen, and walks on at r.delay seconds
+  const u=mkBU(r.cu,side,fid);u.state='reserve';u.arr=r.delay;u.rx=r.rx;for(const f of u.figs)f.fled=true;return u;
 }
 function dims(u){const n=Math.max(1,u.alive.length),f=Math.min(u.L.files,n),r=Math.ceil(n/f);return{f,r,hw:f*u.L.sx/2,hd:Math.max(1.4,r*u.L.sz/2)};}
 const walkSp=u=>2.5+u.T.mv,runSp=u=>walkSp(u)*1.6;
@@ -1472,7 +1619,7 @@ function updRout(u,dt){
   if(!u.contacts.length&&nearFoe(u)>35){u.mor+=(4+(hasAura(u)?2:0))*dt;
     if(u.mor>=40&&u.men/u.max>=.25&&u.rallies<2){u.rallies++;u.state='waver';u.running=false;u.order='none';u.dest=null;flt(u,'RALLIED','#c4f2b0');sndEv('rally',u);return;}}
   const ez=u.side===0?FZ:-FZ;let wp=wallWaypoint(u,u.x*.98,ez);
-  if(!wp&&Math.sign(ez)===B.ter.ts&&u.z*B.ter.ts>TOWN_Z-14){ // fleeing into the town: make for the nearest avenue, then run up it
+  if(!wp&&!B.field&&Math.sign(ez)===B.ter.ts&&u.z*B.ter.ts>TOWN_Z-14){ // fleeing into the town: make for the nearest avenue, then run up it
     const ax=GATES.reduce((b,g)=>Math.abs(u.x-g)<Math.abs(u.x-b)?g:b);wp=Math.abs(u.x-ax)>3&&u.z*B.ter.ts<TOWN_Z+2?[ax,(TOWN_Z-1)*B.ter.ts]:[ax,ez];}
   wp=wp||[u.x*.98,ez];turnTo(u,Math.atan2(wp[0]-u.x,wp[1]-u.z),dt,4);
   const [fx,fz]=fwdV(u.face),s=runSp(u)*1.05*terrMul(u,u.x,u.z)*dt;u.x+=fx*s;u.z+=fz*s;u.spd=s/dt;
@@ -1605,8 +1752,26 @@ function aiThink(s){
 }
 
 /* ================= BATTLE: SIMULATION ================= */
+function placeFigs(u){ // put every man of a unit in his place in the ranks at once
+  const L=u.L,al=u.alive,n=al.length,d=u.dm,[lx,lz]=latV(u.face),[fx,fz]=fwdV(u.face);
+  for(let j=0;j<n;j++){const f=al[j],file=j%d.f,rank=Math.floor(j/d.f),rowN=rank===d.r-1?n-rank*d.f:d.f,ox=(file-(rowN-1)/2)*L.sx,oz=((d.r-1)/2-rank)*L.sz;
+    f.x=u.x+lx*ox+fx*oz;f.z=u.z+lz*ox+fz*oz;f.y=heightAt(f.x,f.z);f.yaw=u.face;}
+}
+function arrive(u){ // a relief army reaches the field from its flank and marches up to the line
+  const sg=u.side===0?1:-1,Z=zoneOf(u.side),town=!B.field&&u.side===B.defSide;
+  u.x=u.rx*(FX-14);u.z=town?sg*(WALL_Z+TOWN_Z)/2:sg*(FZ-12);u.face=homeFace(u.side);u.state='ok';u.mor=u.T.mor+u.xp*4;
+  for(const f of u.figs)f.fled=false;placeFigs(u);u.sg=seg(u);
+  const tx=u.rx*38+rnd(-6,6),tz=sg*(Z.front+(town?3:10));u.home={x:tx,z:tz};u.order='move';u.dest=openDest({x:tx,z:tz,face:homeFace(u.side)});
+  if(B.headless||!R3.scene)return;
+  const k=u.arr+'_'+u.rx;B.ann=B.ann||{};
+  if(!B.ann[k]){B.ann[k]=1;const n=B.units.filter(x=>x.side===u.side&&x.arr===u.arr&&x.rx===u.rx).length;
+    banner(u.side===0?`Relief arrives — ${n} unit${n>1?'s':''} on the flank!`:`Enemy reinforcements — ${n} unit${n>1?'s':''} on the flank!`);
+    B.events.push({t:B.time+5,fn:()=>{if(B&&!B.over&&B.phase==='battle')banner(false);}});AU.ui(u.side===0?'fanfare':'alarm');}
+  flt(u,'RELIEF!',u.side===0?'#c4f2b0':'#ffb3a6');for(let i=0;i<6;i++)fxDust(u.x+rnd(-8,8),u.z+rnd(-3,3),true);
+}
 function simStep(dt){
   B.time+=dt;
+  for(const u of B.units)if(u.state==='reserve'&&B.time>=u.arr)arrive(u);
   computeContacts();
   for(const s of [0,1])if(s===1||B.auto){B.aiT[s]-=dt;if(B.aiT[s]<=0){B.aiT[s]=.5;aiThink(s);}}
   for(const u of B.units)if(onField(u))updUnit(u,dt);
@@ -1623,11 +1788,11 @@ function checkOver(){
   return false;
 }
 function zoneOf(s){
-  const sg=s===0?1:-1,[a,b]=s===B.defSide?[WALL_Z+3,TOWN_Z-3]:[WALL_Z+6,FZ-6];
+  const sg=s===0?1:-1,[a,b]=B.field?[48,FZ-8]:s===B.defSide?[WALL_Z+3,TOWN_Z-3]:[WALL_Z+6,FZ-6];
   return{x0:-FX+8,x1:FX-8,z0:Math.min(a*sg,b*sg),z1:Math.max(a*sg,b*sg),front:a};
 }
 function autoDeploy(s){
-  const Z=zoneOf(s),sg=s===0?1:-1,us=B.units.filter(u=>u.side===s),row0=[];
+  const Z=zoneOf(s),sg=s===0?1:-1,us=B.units.filter(u=>u.side===s&&u.state!=='reserve'),row0=[];
   us.filter(u=>['inf','spear','eleph'].includes(u.kind)).sort((a,b)=>b.T.def-a.T.def).forEach((u,i)=>i%2?row0.push(u):row0.unshift(u));
   us.filter(u=>u.kind==='cav').forEach((u,i)=>i%2?row0.push(u):row0.unshift(u));
   const rows=[],maxW=Z.x1-Z.x0;
@@ -1919,7 +2084,7 @@ function buildGround(scene){
   for(let i=0;i<a.count;i+=3){ // one colour per facet for the low-poly look: meadow, drier patches, bare earth, rocky slopes, dark woodland floor
     const x0=a.getX(i),y0=a.getY(i),z0=a.getZ(i),ux=a.getX(i+1)-x0,uy=a.getY(i+1)-y0,uz=a.getZ(i+1)-z0,vx=a.getX(i+2)-x0,vy=a.getY(i+2)-y0,vz=a.getZ(i+2)-z0;
     const x=x0+(ux+vx)/3,y=y0+(uy+vy)/3,z=z0+(uz+vz)/3,nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx,up=Math.abs(ny)/(Math.hypot(nx,ny,nz)||1);
-    if(z*B.ter.ts>WALL_Z-2&&Math.abs(z)<FZ+25&&Math.abs(x)<FX+25)tc.copy(town);
+    if(!B.field&&z*B.ter.ts>WALL_Z-2&&Math.abs(z)<FZ+25&&Math.abs(x)<FX+25)tc.copy(town);
     else if(forestAt(x,z))tc.copy(wood).multiplyScalar(.9+.18*vnoise(x*.15,z*.15));
     else{const n1=vnoise(x*.022+gn,z*.022),n2=vnoise(x*.07+gn*2,z*.07+9);
       tc.copy(lush).lerp(lush2,n2).lerp(dry,sstep(.55,.8,n1)*.75).lerp(dirt,sstep(.8,.93,n2)*.8).lerp(dry,sstep(4,9,y)*.3).lerp(rock,sstep(.96,.84,up)*.6);
@@ -1974,7 +2139,7 @@ const lamb=o=>new THREE.MeshLambertMaterial(o);
 function buildScenery(scene){
   const T=THREE,R=B.ter.R,ts=B.ter.ts,trees=[],tint=()=>new T.Color(.85+R()*.2,.85+R()*.2,.8+R()*.15).getHex();
   for(const W of B.ter.woods){const n=Math.round(W.r*W.r*.07);for(let i=0;i<n;i++){const a=R()*6.28,r=Math.sqrt(R())*W.r,x=W.x+Math.cos(a)*r,z=W.z+Math.sin(a)*r,s=.8+R()*.6;if(!onRoad(x,z,4.5))trees.push([x,heightAt(x,z)-.1,z,R()*6,s,s*(.85+R()*.3),s,tint()]);}}
-  for(let i=0;i<170;i++){const x=(R()*2-1)*(FX+160),z=(R()*2-1)*(FZ+160);if((Math.abs(x)<FX+6&&Math.abs(z)<FZ+6)||z*ts>WALL_Z-6||onRoad(x,z,5))continue;const s=.8+R()*.7;trees.push([x,heightAt(x,z)-.1,z,R()*6,s,s,s,tint()]);}
+  for(let i=0;i<170;i++){const x=(R()*2-1)*(FX+160),z=(R()*2-1)*(FZ+160);if((Math.abs(x)<FX+6&&Math.abs(z)<FZ+6)||(!B.field&&z*ts>WALL_Z-6)||onRoad(x,z,5))continue;const s=.8+R()*.7;trees.push([x,heightAt(x,z)-.1,z,R()*6,s,s,s,tint()]);}
   for(let i=0;i<420;i++){const a=R()*6.283,dx=Math.cos(a),dz=Math.sin(a),t=Math.min((FX+170)/Math.max(1e-6,Math.abs(dx)),(FZ+170)/Math.max(1e-6,Math.abs(dz)))+4+Math.pow(R(),1.5)*260; // woods on the hills beyond
     const x=dx*t,z=dz*t;if(vnoise(x*.006+5,z*.006-B.ter.gn)<.45)continue;const s=1.1+R()*.9;trees.push([x,farH(x,z)-.2,z,R()*6,s,s*(.85+R()*.3),s,tint()]);}
   placeInstances(scene,mergeParts([prt(cy(.22,.32,2,5),0x5a3d22,{y:1}),prt(cn(1.7,3.4,6),0x3d6a2a,{y:3.3}),prt(cn(1.3,2.6,6),0x4a7a33,{y:4.7})]),lamb({vertexColors:true}),trees,true);
@@ -1983,7 +2148,7 @@ function buildScenery(scene){
 function buildRoad(scene){ // a cart track with two worn ruts, draped over the field
   const T=THREE,ts=B.ter.ts,O=[-1,-.62,-.42,-.18,.18,.42,.62,1],hw=2.9,P=[],C=[],I=[];
   const cE=new T.Color(0x8d8a52),cR=new T.Color(0xa08a5e),cT=new T.Color(0x7c6646),col=[cE,cR,cT,cR,cR,cT,cR,cE];let rows=0;
-  for(let zl=-FZ-165;zl<=WALL_Z+1;zl+=2){
+  for(let zl=-FZ-165;zl<=(B.field?FZ+165:WALL_Z+1);zl+=2){
     const x=roadX(zl);let dx=roadX(zl+1)-roadX(zl-1),dz=2;const l=Math.hypot(dx,dz);dx/=l;dz/=l;
     for(let k=0;k<8;k++){const px=x+dz*O[k]*hw,pz=(zl-dx*O[k]*hw)*ts;P.push(px,heightAt(px,pz)+.15,pz);C.push(col[k].r,col[k].g,col[k].b);}
     if(rows){const a=(rows-1)*8,b=rows*8;for(let k=0;k<7;k++)I.push(a+k,b+k,b+k+1,a+k,b+k+1,a+k+1);}rows++;}
@@ -1991,7 +2156,7 @@ function buildRoad(scene){ // a cart track with two worn ruts, draped over the f
   const m=new T.Mesh(g,lamb({vertexColors:true,side:T.DoubleSide,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3}));m.receiveShadow=true;scene.add(m);
 }
 function buildRocks(scene,R){
-  const T=THREE,ts=B.ter.ts,items=[],put=(x,z,s)=>{if(!onRoad(x,z,3.5+s)&&z*ts<WALL_Z-8&&!forestAt(x,z))items.push([x,z,s]);};
+  const T=THREE,ts=B.ter.ts,items=[],put=(x,z,s)=>{if(!onRoad(x,z,3.5+s)&&(B.field||z*ts<WALL_Z-8)&&!forestAt(x,z))items.push([x,z,s]);};
   for(let i=0;i<80;i++)put((R()*2-1)*(FX+70),(R()*2-1)*(FZ+70),.25+R()*.6);
   for(const H of B.ter.hills)for(let i=0,n=4+Math.round(H.h);i<n;i++){const a=R()*6.28,r=Math.sqrt(R())*H.r*.7;put(H.x+Math.cos(a)*r,H.z+Math.sin(a)*r,.3+R()*1.1);} // outcrops on the hills
   const m=new T.InstancedMesh(new T.DodecahedronGeometry(1,0),lamb(),Math.max(1,items.length)),c=new T.Color(),cols=[0x8b8478,0x7d776c,0x9a9282,0x857a68];
@@ -2002,7 +2167,7 @@ function buildGrass(scene){ // tufts and wild flowers, swaying in the wind; they
   const N=GQ[gfx].grass;if(!N)return;
   const T=THREE,R=mulberry32(91),ts=B.ter.ts,gn=B.ter.gn,tuft=[],flow=[],far=gfx==='high'?140:105,vt=R3.renderer.capabilities.maxVertexTextures>0;
   for(let k=0;k<N*2&&tuft.length+flow.length<N;k++){const x=(R()*2-1)*(FX+30),z=(R()*2-1)*(FZ+30);
-    if(z*ts>WALL_Z-4||onRoad(x,z,3.4)||vnoise(x*.07+gn*2,z*.07+9)>.84||R()>.3+.7*vnoise(x*.05+7,z*.05))continue; // bare patches stay bare; meadows grow thicker
+    if((!B.field&&z*ts>WALL_Z-4)||onRoad(x,z,3.4)||vnoise(x*.07+gn*2,z*.07+9)>.84||R()>.3+.7*vnoise(x*.05+7,z*.05))continue; // bare patches stay bare; meadows grow thicker
     (vnoise(x*.09+3,z*.09+gn)>.66&&R()<.45?flow:tuft).push([x,z,R()]);}
   const mat=lamb({vertexColors:true}); // blades are two-faced triangles that both catch the light from above, so none turns black from behind
   mat.onBeforeCompile=sh=>{sh.uniforms.uT=R3.uT;sh.uniforms.uMud={value:R3.mud.tex};
@@ -2060,6 +2225,13 @@ function stoaGeo(){ // a colonnade with shops along its back wall, front to −z
   P.push(prt(bx(38.6,.6,1.1),M,{y:4.9,z:-2.9}),prt(prismGeo(),0xa4553a,{y:5.2,sx:39,sy:1.7,sz:7.8}));
   return mergeParts(P);
 }
+function keepGeo(){ // a fort's keep: a squat stone tower with corner turrets, a battlement and a standard, door to −z
+  const M=0xb8b0a0,D=0xa39b8a,L=0xc9c2b2,P=[prt(bx(18,1.2,18),D,{y:.6}),prt(bx(13,9,13),M,{y:5.7}),prt(bx(14.4,.9,14.4),D,{y:10.65})];
+  for(const x of [-6.4,6.4])for(const z of [-6.4,6.4])P.push(prt(bx(3.2,12.6,3.2),M,{x,y:7.5,z}),prt(cn(2.6,2.2,4),0xa4553a,{x,y:14.9,z,ry:Math.PI/4}));
+  for(let k=-4.4;k<=4.4;k+=2.2)for(const z of [-7,7])P.push(prt(bx(1,1.1,.6),L,{x:k,y:11.7,z}));
+  P.push(pane(2.8,4.4,0x3a2a1c,{y:3.4,z:-6.52,ry:Math.PI}),prt(cy(.14,.16,8,5),WOOD,{y:15,z:0}),prt(bx(2.6,1.5,.1),0xb0281f,{x:1.4,y:18.2,z:0}));
+  return mergeParts(P);
+}
 function townGround(scene){ // paving on the square and the avenues, beaten earth between the houses
   const T=THREE,ts=B.ter.ts,R=mulberry32(17),S=2,P=[],C=[],N=[],c=new T.Color(),pave=new T.Color(0xc9bea6),street=new T.Color(0xab9f88),earth=new T.Color(0x9a8a6a);
   const ave=x=>GATES.some(g=>Math.abs(x-g)<AVE_W/2);
@@ -2070,6 +2242,7 @@ function townGround(scene){ // paving on the square and the avenues, beaten eart
   const m=new T.Mesh(g,lamb({vertexColors:true,side:T.DoubleSide,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));m.receiveShadow=true;scene.add(m);
 }
 function buildTown(scene){
+  if(B.field)return;
   const T=THREE,TW=B.town,ts=B.ter.ts,R=mulberry32(33),walls=[[],[],[]],gab=[],hip=[];
   townGround(scene);
   for(const h of TW.houses){const cx=(h.x0+h.x1)/2,cz=(h.z0+h.z1)/2*ts,w=h.x1-h.x0,d=h.z1-h.z0,ax=Math.abs(Math.sin(h.ry))<.5,sx=ax?w:d,sz=ax?d:w;
@@ -2079,7 +2252,7 @@ function buildTown(scene){
   walls.forEach((it,i)=>{if(it.length)placeInstances(scene,houseGeo(i+1),lamb({vertexColors:true}),it,true);});
   placeInstances(scene,prismGeo(),lamb(),gab,true);placeInstances(scene,hipGeo(),lamb(),hip,true);
   const at=(geo,o)=>{const m=new T.Mesh(geo,lamb({vertexColors:true}));m.position.set(o.x,.2,o.z*ts);m.rotation.y=ts===1?0:Math.PI;m.castShadow=m.receiveShadow=true;scene.add(m);}; // facing the square
-  at(templeGeo(),TW.temple);if(TW.stoa)at(stoaGeo(),TW.stoa);
+  if(TW.temple)at(TW.temple.keep?keepGeo():templeGeo(),TW.temple);if(TW.stoa)at(stoaGeo(),TW.stoa);
   if(TW.cyp.length)placeInstances(scene,mergeParts([prt(cy(.15,.2,1.2,5),0x5a3d22,{y:.6}),prt(cn(.85,6,6),0x2f5226,{y:3.9})]),lamb({vertexColors:true}),TW.cyp.map(([x,z,s])=>[x,.2,z*ts,R()*6,s,s*(.9+R()*.3),s,null]),true);
   if(B.walls)buildWalls(scene);
 }
@@ -2479,6 +2652,11 @@ function buildHud(){
     const d=document.createElement('div');d.className='blab'+(u.side===0?' mine':'');d.innerHTML=symSvg(u.kind,FACTIONS[u.fid].color,24)+'<i><b></b></i>';
     L.appendChild(d);u.lab=d;u.labBar=d.querySelector('b');}
 }
+function reliefTip(){
+  const a=B.units.filter(u=>u.state==='reserve');if(!a.length)return'';
+  const mine=a.filter(u=>u.side===0),foe=a.filter(u=>u.side===1),t=us=>fmtT(Math.min(...us.map(u=>u.arr-B.time)));
+  return(mine.length?` <b>Relief:</b> ${mine.length} of your units arrive from the flank in about ${t(mine)}.`:'')+(foe.length?` The enemy has ${foe.length} unit${foe.length>1?'s':''} marching to join him (${t(foe)}).`:'');
+}
 function hud(){
   if(!B)return;const dep=B.phase==='deploy';
   $('#bRound').textContent=dep?'Deployment':B.over?'Battle over':`${fmtT(BATTLE_TIME-B.time)} ${B.defSide===0?'to hold':'left'}`;
@@ -2502,8 +2680,8 @@ function hud(){
   else if(ins)h=unitLine(ins);
   else if(sel.length===1)h=unitLine(sel[0]);
   else if(sel.length>1)h=`<div class="b-tip"><b>${sel.length} units selected.</b> ${dep?'Tap inside the blue zone to place them.':'Tap the ground to march in formation, or an enemy to attack.'} Hold a unit to add or drop it.</div>`;
-  else if(dep)h=`<div class="b-tip"><b>Deploy your army.</b> Tap a unit or its card, then tap inside the blue zone. Tap it again to deselect; hold a unit to add it to a group. Drag to pan, pinch to zoom.${B.walls&&B.defSide===1?' The enemy holds walls — enter through the gates.':''}</div>`;
-  else h=`<div class="b-tip"><b>${B.speed?'Battle on.':'Paused — orders still work.'}</b> Select units, then tap the ground to march or an enemy to attack. Charge, and hit flanks and rear to break them. ${B.defSide===0?'Hold until time runs out.':'Break them before time runs out.'}</div>`;
+  else if(dep)h=`<div class="b-tip"><b>Deploy your army.</b> Tap a unit or its card, then tap inside the blue zone. Tap it again to deselect; hold a unit to add it to a group. Drag to pan, pinch to zoom.${B.field?' Open ground: no walls to hide behind.':''}${B.walls&&B.defSide===1?(B.fort?' The enemy holds a fort — enter through the gates.':' The enemy holds walls — enter through the gates.'):''}${reliefTip()}</div>`;
+  else h=`<div class="b-tip"><b>${B.speed?'Battle on.':'Paused — orders still work.'}</b> Select units, then tap the ground to march or an enemy to attack. Charge, and hit flanks and rear to break them. ${B.defSide===0?'Hold until time runs out.':'Break them before time runs out.'}${reliefTip()}</div>`;
   if(h!==B.lastInfo){$('#bInfo').innerHTML=h;B.lastInfo=h;}
 }
 function setSpeed(sp){if(!B||B.phase!=='battle'||B.headless)return;if(B.speed)B.lastSpeed=B.speed;B.speed=sp;hud();}
@@ -2522,10 +2700,10 @@ async function runBattle0(o){
 function startBattle(o,done){
   initRenderer();R3.renderer.setPixelRatio(gfxPR());R3.renderer.shadowMap.enabled=GQ[gfx].shadow>0;
   const attSide=o.playerIsAttacker?0:1;
-  B={o,done,phase:'deploy',time:0,speed:1,lastSpeed:1,acc:0,attSide,defSide:1-attSide,walls:o.walls||0,townBonus:1+3*(o.walls||0),
+  B={o,done,phase:'deploy',time:0,speed:1,lastSpeed:1,acc:0,attSide,defSide:1-attSide,walls:o.walls||0,townBonus:1+3*(o.walls||0),field:!!o.field,fort:!!o.fort,land:o.land||null,
      sel:new Set(),insp:null,over:false,auto:false,headless:false,aiT:[0,0],events:[],pairs:new Set(),rLoss:[0,0],shots:[],uiT:0,lastInfo:'',lastCard:{id:null,t:0},atmo:ATMOS[o.atmo]?o.atmo:pickAtmo()};
   B.ter=mkTerrain(B.defSide);B.town=mkTown();mkBlock();
-  B.units=[...o.pUnits.map(u=>mkBU(u,0,PLAYER)),...o.eUnits.map(u=>mkBU(u,1,o.eFid))];
+  B.units=[...o.pUnits.map(u=>mkBU(u,0,PLAYER)),...o.eUnits.map(u=>mkBU(u,1,o.eFid)),...(o.pRelief||[]).map(r=>mkRelief(r,0,PLAYER)),...(o.eRelief||[]).map(r=>mkRelief(r,1,o.eFid))];
   autoDeploy(0);autoDeploy(1);B.init=[sideMen(0),sideMen(1)];
   for(const u of B.units)u.sg=seg(u);
   buildScene();buildHud();
@@ -2660,6 +2838,7 @@ function cmColor(h,ny,x,z,r,tc){ // one flat colour per facet
 function cmTerrain(scene){
   const T=THREE,H=CM.HG=new Float32Array(CGX*CGZ);
   for(const n of NODES)n.gh=Math.max(1.1,cmBase(n.x,n.z));
+  for(const n of PNODES)n.gh=Math.max(1.1,cmBase(n.x,n.z));
   for(const n of NODES){ // the spot beside each city where its army stands: toward the nearest neighbour, swung aside
     let best=null,bd=1e9;for(const id of ADJ[n.id]){const m=NODE[id],d=Math.hypot(m.x-n.x,m.z-n.z);if(d<bd){bd=d;best=m;}}
     const a=Math.atan2(best.z-n.z,best.x-n.x)+.6;n.ux=Math.cos(a);n.uz=Math.sin(a);}
@@ -2668,6 +2847,9 @@ function cmTerrain(scene){
     for(const n of NODES){const dx=x-n.x,dz=z-n.z;if(Math.abs(dx)>64||Math.abs(dz)>64)continue;
       const dd=Math.hypot(dx,dz),t=clamp((dx*n.ux+dz*n.uz)/48,0,1)*48,ds=Math.hypot(dx-n.ux*t,dz-n.uz*t);
       const w=Math.max(sstep(20,9,dd),sstep(18,10,ds));if(w>0)h=lerp(h,n.gh,w);}
+    for(const n of PNODES){const dx=x-n.x,dz=z-n.z;if(Math.abs(dx)>40||Math.abs(dz)>40)continue;
+      const dd=Math.hypot(dx,dz),t=clamp((dx*n.ux+dz*n.uz)/20,0,1)*20,ds=Math.hypot(dx-n.ux*t,dz-n.uz*t);
+      const w=Math.max(sstep(12,5,dd),sstep(9,4,ds));if(w>0)h=lerp(h,n.gh,w);}
     H[j*CGX+i]=h;}
   const cells=(CGX-1)*(CGZ-1),pos=new Float32Array(cells*18),col=new Float32Array(cells*18),uv=new Float32Array(cells*12),rr=mulberry32(21),tc=new T.Color();
   let p=0,q=0;const sx=GW*CELL,sz=GH*CELL;
@@ -2819,8 +3001,8 @@ function cmWaterTick(t){
 }
 
 /* ---- roads, sea lanes, trees ---- */
-function cmCurve(a,b,N){const A=NODE[a],B=NODE[b],c=EDGE_CTRL[a+'|'+b],pts=[];
-  for(let k=0;k<=N;k++){const t=k/N,u=1-t;pts.push([u*u*A.x+2*u*t*c[0]+t*t*B.x,u*u*A.z+2*u*t*c[1]+t*t*B.z]);}return pts;}
+function cmCurve(a,b,N){const c=segCurve(a,b),pts=[];
+  for(let k=0;k<=N;k++){const t=k/N,u=1-t;pts.push([u*u*c.x0+2*u*t*c.cx+t*t*c.x1,u*u*c.z0+2*u*t*c.cz+t*t*c.z1]);}return pts;}
 function cmRibbon(P,C,pts,hw,yf,col,dash){ // a flat strip hugging the ground, pushed into position/colour arrays
   const cl=col instanceof THREE.Color?col:new THREE.Color(col),n=pts.length,L=[],R=[];
   for(let k=0;k<n;k++){const a=pts[Math.max(0,k-1)],b=pts[Math.min(n-1,k+1)];let dx=b[0]-a[0],dz=b[1]-a[1];const l=Math.hypot(dx,dz)||1;dx/=l;dz/=l;
@@ -2846,7 +3028,7 @@ function cmRoads(scene){
 }
 function cmTrees(scene,mask){
   const T=THREE,rr=mulberry32(77),items=[],tint=()=>new T.Color(.85+rr()*.2,.85+rr()*.2,.8+rr()*.15).getHex();
-  const near=(x,z)=>{for(const n of NODES){const dx=x-n.x,dz=z-n.z;if(dx*dx+dz*dz<700)return true;const t=clamp((dx*n.ux+dz*n.uz)/48,0,1)*48;if(Math.hypot(dx-n.ux*t,dz-n.uz*t)<14)return true;}return false;};
+  const near=(x,z)=>{for(const n of PNODES)if((x-n.x)**2+(z-n.z)**2<520)return true;for(const n of NODES){const dx=x-n.x,dz=z-n.z;if(dx*dx+dz*dz<700)return true;const t=clamp((dx*n.ux+dz*n.uz)/48,0,1)*48;if(Math.hypot(dx-n.ux*t,dz-n.uz*t)<14)return true;}return false;};
   for(let gz=12;gz<MH-12;gz+=11)for(let gx=12;gx<MW-12;gx+=11){
     const x=gx+(rr()-.5)*9,z=gz+(rr()-.5)*9,h=hm(x,z);if(h<.9||h>10.5)continue;
     if(sstep(878,905,z)*(x<500?1:0)>.3)continue;
@@ -3001,6 +3183,25 @@ function cmCityGeo(n,s,cap){
   else P.push(prt(bx(3,1.7,.12),F.color,{x:px+1.6,y:hp-.9,z:pz}),prt(bx(3,.3,.14),0xf0e4c0,{x:px+1.6,y:hp-1.6,z:pz}));
   return mergeParts(P);
 }
+function cmPassGeo(n,s){ // a stopping place on the road: standing stones; tents when an army camps; a palisade or stone walls once fortified
+  const fort=s.bld.walls,camp=s.units.length>0,own=camp||fort?s.owner:null,P=[prt(cy(8.5,9.5,.5,14),0xa89a74,{y:.1})];
+  if(!fort){
+    for(let i=0;i<3;i++){const a=i*2.1+.5,h=3+i*.7;P.push(prt(bx(1.5,h,1.3),0x8e8878,{x:Math.cos(a)*3.4,y:h/2+.3,z:Math.sin(a)*3.4,ry:a}));}
+    P.push(prt(cn(2,1.4,5),0x77716a,{y:1}));
+  }else{
+    const N=10,wr=8.4,wh=fort===1?2.6:3.6,wc=fort===1?0x7a5a38:0xa39b8a,th=fort===1?5.5:7;
+    for(let k=0;k<N;k++){const a=k/N*6.2832,a2=(k+1)/N*6.2832,x0=Math.cos(a)*wr,z0=Math.sin(a)*wr,x1=Math.cos(a2)*wr,z1=Math.sin(a2)*wr;
+      P.push(prt(bx(1.2,wh+1.4,1.2),wc,{x:x0,y:(wh+1.4)/2+.3,z:z0}));
+      if(k===0)continue; // the gate
+      P.push(prt(bx(Math.hypot(x1-x0,z1-z0)+.2,wh,.8),wc,{x:(x0+x1)/2,y:wh/2+.3,z:(z0+z1)/2,ry:-Math.atan2(z1-z0,x1-x0)}));}
+    P.push(prt(bx(3.4,th,3.4),wc,{x:-2.4,y:th/2+.3,z:-2.4}),prt(cn(2.8,2,4),0xa4553a,{x:-2.4,y:th+1.3,z:-2.4,ry:Math.PI/4}));
+  }
+  if(camp)for(let i=0;i<3;i++){const a=i*2.1+1.3,r=fort?3.4:5.4;P.push(prt(cn(1.7,2.2,4),0xe2d6b4,{x:Math.cos(a)*r+(fort?1.6:0),y:1.4,z:Math.sin(a)*r+(fort?1.6:0),ry:a}));}
+  const hp=9,fx=fort?2.6:0,fz=fort?2.6:0;P.push(prt(cy(.12,.15,hp,5),0x4a3322,{x:fx,y:hp/2+.3,z:fz}));
+  if(own)P.push(prt(bx(3,1.7,.12),FACTIONS[own].color,{x:fx+1.6,y:hp-.9,z:fz}),prt(bx(3,.3,.14),0xf0e4c0,{x:fx+1.6,y:hp-1.6,z:fz}));
+  else P.push(prt(bx(2.2,1.2,.12),0x9a9486,{x:fx+1.2,y:hp-.8,z:fz}));
+  return mergeParts(P);
+}
 function cmFigGeo(fid,type){
   const k=UNITS[type].kind,key=fid+'|'+type;
   if(CM.figs[key])return CM.figs[key];
@@ -3043,7 +3244,8 @@ function cmFront(n,s){ // the way a city's army faces: toward the nearest enemy,
 /* ---- sync the 3D scene with the game state ---- */
 function cmSync(){
   if(!CM.ok||!G)return;
-  const mv=UI.move,adj=mv?new Set(ADJ[mv.from]):null;
+  tidyPasses();
+  const mv=UI.move,adj=mv?new Set(moveTargets(mv.from)):null;
   if(UI.sel!==CM.lastSel){CM.lastSel=UI.sel;if(UI.sel){const c=CM.city[UI.sel];if(c.vis&&c.by>CM.H*.42)cmCenterOn(UI.sel,true,.2);}} // keep a picked city above the sheet
   for(const n of NODES){
     const c=CM.city[n.id],s=G.s[n.id],F=FACTIONS[s.owner],cap=G.cap[s.owner]===n.id,tr=tier(s),wl=s.bld.walls;
@@ -3067,12 +3269,30 @@ function cmSync(){
     c.sel.visible=UI.sel===n.id||!!(mv&&mv.from===n.id);
     c.tgt.visible=isT;if(isT)c.tgt.material=foe?CM.ringFoe:CM.ringGo;
   }
+  for(const n of PNODES){ // passes and forts
+    const c=CM.city[n.id],s=G.s[n.id],held=s.units.length>0,fort=s.bld.walls,own=held||fort?s.owner:null;
+    const ck=[own,fort,held?1:0].join('|');
+    if(c.ck!==ck){c.ck=ck;if(c.mesh){c.grp.remove(c.mesh);c.mesh.geometry.dispose();}
+      c.mesh=new THREE.Mesh(cmPassGeo(n,s),CM.mat);c.mesh.castShadow=true;c.grp.add(c.mesh);c.r0=fort?12:9;c.sel.scale.setScalar(c.r0);c.tgt.scale.setScalar(c.r0+3);}
+    const ak=(held?s.owner:'')+'|'+s.units.map(u=>u.type).join(',');if(c.ak!==ak)cmSetArmy(c,s.owner,s.units.map(u=>u.type),ak);
+    let face=NODE[n.a];if(held)for(const e of [NODE[n.a],NODE[n.b]])if(G.s[e.id].owner!==s.owner){face=e;break;} // the army faces the enemy end of its road
+    c.fy=Math.atan2(face.x-n.x,face.z-n.z);
+    const isT=!!(adj&&adj.has(n.id)),foe=isT&&isFoeTarget(n.id),ready=held&&s.owner===PLAYER&&s.units.some(u=>!u.moved);
+    const lk=[own,s.units.length,ready?1:0,s.build&&s.owner===PLAYER?1:0,fort,foe?1:0].join('|');
+    if(c.lk!==lk){c.lk=lk;c.lw=0;c.lab.style.setProperty('--fc',own?FACTIONS[own].color:'#9a9486');c.lab.classList.toggle('foe',foe);
+      c.ls.textContent=(fort?'🏰':'⛰')+(s.build&&s.owner===PLAYER?'🔨':'');
+      c.lb.textContent=s.units.length||'';c.lb.style.display=s.units.length?'':'none';c.lb.classList.toggle('ready',ready);}
+    c.small=true;c.pri=(held?2:0)+(held&&s.owner===PLAYER?4:0)+(fort?1:0)+(UI.sel===n.id?30:0)+(isT?20:0);
+    c.sel.visible=UI.sel===n.id||!!(mv&&mv.from===n.id);
+    c.tgt.visible=isT;if(isT)c.tgt.material=foe?CM.ringFoe:CM.ringGo;
+    c.zone.visible=held;if(held)c.zone.material.color.set(FACTIONS[s.owner].color); // the zone of control: the road is closed to the owner's enemies
+  }
   CM.mvKey=mv?mv.from:null;cmRoutes(mv);
 }
 function cmRoutes(mv){
   for(const m of CM.hl){CM.scene.remove(m);m.geometry.dispose();}CM.hl=[];if(!mv)return;
-  for(const id of ADJ[mv.from]){
-    const A=NODE[mv.from],B=NODE[id],len=Math.hypot(B.x-A.x,B.z-A.z),pts=cmCurve(mv.from,id,Math.ceil(len/4)),P=[],C=[],foe=G.s[id].owner!==PLAYER;
+  for(const id of moveTargets(mv.from)){
+    const sc=segCurve(mv.from,id),len=Math.hypot(sc.x1-sc.x0,sc.z1-sc.z0),pts=cmCurve(mv.from,id,Math.max(4,Math.ceil(len/4))),P=[],C=[],foe=isFoeTarget(id);
     cmRibbon(P,C,pts,2.1,(x,z)=>Math.max(hm(x,z),.3)+.9,foe?0xe2553f:0xf0c75a,false);
     const m=cmRibbonMesh(P,C,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide,transparent:true,opacity:.9,depthWrite:false,depthTest:false,toneMapped:false}));
     m.renderOrder=6;CM.scene.add(m);CM.hl.push(m);}
@@ -3081,7 +3301,7 @@ function cmRoutes(mv){
 /* ---- armies marching between cities ---- */
 function cmMarch(fromId,toId,fid,units,quick){
   if(!CM.on||CM.paused||!units.length)return Promise.resolve();
-  const A=NODE[fromId],B=NODE[toId],ctl=EDGE_CTRL[fromId+'|'+toId],sea=EDGES.some(e=>e[2]&&((e[0]===fromId&&e[1]===toId)||(e[0]===toId&&e[1]===fromId)));
+  const sg=segCurve(fromId,toId),A={x:sg.x0,z:sg.z0},B={x:sg.x1,z:sg.z1},ctl=[sg.cx,sg.cz],sea=!PNODE[fromId]&&!PNODE[toId]&&EDGES.some(e=>e[2]&&((e[0]===fromId&&e[1]===toId)||(e[0]===toId&&e[1]===fromId)));
   const rest=G.s[fromId].units.filter(u=>!units.includes(u));cmSetArmy(CM.city[fromId],G.s[fromId].owner,rest.map(u=>u.type),'march');
   const mesh=new THREE.Mesh(cmArmyGeo(fid,units.map(u=>u.type)),CM.mat);mesh.castShadow=true;
   if(sea){const b=new THREE.Mesh(CM.boat,CM.mat);b.castShadow=true;b.scale.setScalar(1.6);b.position.y=-.6;mesh.add(b);}
@@ -3164,7 +3384,7 @@ function cmPointer(el){
 }
 function cmTap(px,py){
   let best=null,bd=46*46;
-  for(const n of NODES){const c=CM.city[n.id];if(!c.vis)continue;
+  for(const n of ALLN){const c=CM.city[n.id];if(!c.vis)continue;
     const d=Math.min((c.bx-px)**2+(c.by-py)**2,(c.lx-px)**2+(c.ly-py)**2);if(d<bd){bd=d;best=n.id;}}
   if(best){AU.ui('node');onNode(best);}else if(!UI.move&&UI.sel)closeSheet();
 }
@@ -3172,7 +3392,7 @@ function cmTap(px,py){
 /* ---- frame loop ---- */
 function cmProject(){
   const W=CM.W,H=CM.H,s=CM.sc,v=CM.v,far=cv.d>640,show=[];
-  for(const n of NODES){const c=CM.city[n.id];
+  for(const n of ALLN){const c=CM.city[n.id];
     v.set(n.x,n.gh+3*s,n.z).project(CM.cam);c.vis=v.z<1&&Math.abs(v.x)<1.15&&Math.abs(v.y)<1.15;
     c.bx=(v.x+1)/2*W;c.by=(1-v.y)/2*H;
     v.set(n.x,n.gh+12*s,n.z).project(CM.cam);c.lx=(v.x+1)/2*W;c.ly=(1-v.y)/2*H;
@@ -3193,9 +3413,12 @@ function cmFrame(now){
   const s=CM.sc;
   for(const n of NODES){const c=CM.city[n.id];c.grp.scale.setScalar(s);
     if(c.army){const dd=17+8*s;c.army.position.set(n.x+n.ux*dd,n.gh+.15,n.z+n.uz*dd);c.army.scale.setScalar(s*.9);c.army.rotation.y=c.fy;}}
+  for(const n of PNODES){const c=CM.city[n.id];c.grp.scale.setScalar(s);
+    if(c.army){const dd=14+7*s;c.army.position.set(n.x+n.ux*dd,n.gh+.15,n.z+n.uz*dd);c.army.scale.setScalar(s*.85);c.army.rotation.y=c.fy;}}
   if(CM.tick%2===0)cmWaterTick(CM.t);
   cmShipTick(CM.t);cmAnims(dt);
   const pu=.75+.25*Math.sin(CM.t*5);CM.ringGo.opacity=pu;CM.ringFoe.opacity=pu;CM.ringSel.opacity=.6+.4*Math.sin(CM.t*4);
+  for(const n of PNODES){const z=CM.city[n.id].zone;if(z.visible)z.material.opacity=.4+.15*Math.sin(CM.t*2.2+n.k);}
   for(const m of CM.hl)m.material.opacity=.7+.25*Math.sin(CM.t*5);
   cmProject();
   CM.rend.render(CM.scene,CM.cam);
@@ -3223,11 +3446,12 @@ function cmInit(){
   const rm=col=>new T.MeshBasicMaterial({color:col,transparent:true,depthTest:false,side:T.DoubleSide,toneMapped:false});
   CM.ringSel=rm(0xf4cd5c);CM.ringGo=rm(0xf0c75a);CM.ringFoe=rm(0xe2553f);
   const labs=$('#cmLabels');labs.innerHTML='';
-  for(const n of NODES){
+  for(const n of ALLN){
     const grp=new T.Group();grp.position.set(n.x,n.gh,n.z);sc.add(grp);
     const sel=new T.Mesh(rg,CM.ringSel),tgt=new T.Mesh(rg,CM.ringGo);for(const m of [sel,tgt]){m.position.y=.9;m.visible=false;m.renderOrder=5;grp.add(m);}
-    const lab=document.createElement('div');lab.className='clab';lab.innerHTML='<span class="cs"></span><span class="cn"></span><span class="cb"></span>';lab.querySelector('.cn').textContent=n.name;labs.appendChild(lab);
+    const lab=document.createElement('div');lab.className='clab'+(n.pass?' pass':'');lab.innerHTML='<span class="cs"></span><span class="cn"></span><span class="cb"></span>';lab.querySelector('.cn').textContent=n.name;labs.appendChild(lab);
     CM.city[n.id]={grp,sel,tgt,lab,ls:lab.querySelector('.cs'),lb:lab.querySelector('.cb'),mesh:null,army:null,fields:null,rects:[],ck:null,ak:null,lk:null,fk:null,fy:0,r0:12,vis:false,pri:0,lw:0,bx:0,by:0,lx:0,ly:0,small:false};
+    if(n.pass){const zone=new T.Mesh(rg,new T.MeshBasicMaterial({color:0x888888,transparent:true,opacity:.5,depthTest:false,side:T.DoubleSide,toneMapped:false}));zone.scale.setScalar(26);zone.position.y=.9;zone.renderOrder=4;zone.visible=false;grp.add(zone);CM.city[n.id].zone=zone;}
   }
   cmPointer(r.domElement);
   new ResizeObserver(()=>{if(CM.on)cmFit();}).observe($('#mapGL'));
@@ -3237,15 +3461,16 @@ function cmInit(){
 /* ================= CAMPAIGN AI ================= */
 function hostileDist(f){const d={},q=[];for(const n of NODES)if(G.s[n.id].owner!==f){d[n.id]=0;q.push(n.id);}
   while(q.length){const c=q.shift();for(const m of ADJ[c])if(d[m]===undefined){d[m]=d[c]+1;q.push(m);}}return d;}
-const threat=(s,f)=>ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner!==f&&t.owner!=='rebels').reduce((a,t)=>a+armyPower(t.units),0);
+const threat=(s,f)=>moveTargets(s.id).map(id=>G.s[id]).filter(t=>t.owner&&t.owner!==f&&t.owner!=='rebels'&&(!t.pass||t.units.length)).reduce((a,t)=>a+armyPower(t.units),0);
 function desired(s,f,hd){if(G.cap[f]===s.id)return 7;if(hd[s.id]===1)return clamp(3+Math.round(threat(s,f)/300),3,9);return 1;}
 const AI_EDGE=1.4; // an AI attacks only with this much more power than the defenders (scaled by its aggression)
 function aiNeed(s,f,skip,deep=true,pf=.9){ // power a city of f should hold so that no hostile neighbour (other than skip) dares attack it
-  let m=0;for(const id of ADJ[s.id]){const t=G.s[id];if(id===skip||t.owner===f||t.owner==='rebels')continue; // free cities never attack
+  let m=0;for(const id of moveTargets(s.id)){const t=G.s[id];if(id===skip||!t.owner||t.owner===f||t.owner==='rebels'||(t.pass&&!t.units.length))continue; // free cities never attack
     let p=armyPower(t.units);
     if(t.owner===PLAYER)p*=pf; // pf: how much of the player's army next door we expect to come at us
-    else{if(deep)p=Math.max(p*.4,p-aiNeed(t,t.owner,s.id,false)); // it must keep a garrison against its other neighbours
+    else{if(deep&&!t.pass)p=Math.max(p*.4,p-aiNeed(t,t.owner,s.id,false)); // it must keep a garrison against its other neighbours
       p*=FACTIONS[t.owner].aggr/AI_EDGE;}
+    if(!t.pass){const g=gateOn(s.id,id);if(g&&g.units.length&&g.owner===f)p*=.5;} // our pass on that road holds them back
     if(p>m)m=p;}
   return m/(1+.15*s.bld.walls)*(G.cap[f]===s.id?1.3:1.1);
 }
@@ -3304,14 +3529,17 @@ async function aiTurn(f){
   const goal=aiGoal(f);
   for(const s of shuffle(ownedBy(f))){
     if(s.owner!==f||!s.units.some(u=>!u.moved))continue;let best=null,bs=0,bestSend=null;
-    for(const id of ADJ[s.id]){const t=G.s[id];if(t.owner===f)continue;if(t.owner===PLAYER&&G.turn<4)continue;
+    for(const id of moveTargets(s.id)){const t0=G.s[id];if(t0.owner===f)continue;if(t0.owner===PLAYER&&G.turn<4)continue;
+      if(t0.pass&&!t0.units.length)continue; // armies camp on a pass only when the road makes them
+      const gate=t0.pass?null:gateOn(s.id,id),t=blocksFor(gate,f)?gate:t0; // a hostile pass on the road is fought first
+      if(t!==t0&&t.owner===PLAYER&&G.turn<4)continue;
       const free=aiFree(s,f,id);if(!free.length)continue; // what can leave without exposing this city to anyone but the target
-      const dp=t.units.length?armyPower(t.units)*(1+.15*t.bld.walls):0,needT=aiNeed(t,f,null,true,.45); // bolder against the player: losing a city back to them is part of the game
+      const dp=t.units.length?armyPower(t.units)*(1+.15*t.bld.walls):0,needT=t.pass?0:aiNeed(t,f,null,true,.45); // bolder against the player: losing a city back to them is part of the game
       const send=aiForce(free,Math.max(dp*1.8/F.aggr,needT)),ap=armyPower(send); // enough to win cleanly and to hold the city after
       if(dp>0&&ap<dp*AI_EDGE/F.aggr)continue;
       const left=dp?ap*(.95-.4*(dp/ap)**2):ap; // roughly what survives the fight (see autoResolve)
       if(left<needT*.5)continue; // it would only be taken straight back
-      let sc=(ap+1)/(dp+50)+(t.owner==='rebels'?.4:0)+(t.owner===PLAYER?.3:0)+(G.cap[t.owner]===t.id?.25:0)+t.pop/20000+(goal&&goal.t===t?.5:0);
+      let sc=(ap+1)/(dp+50)+(t0.owner==='rebels'?.4:0)+(t0.owner===PLAYER?.3:0)+(G.cap[t0.owner]===t0.id?.25:0)+t0.pop/20000+(goal&&goal.t===t0?.5:0)+(t0.pass?.1:0);
       if(left<needT*.8)sc*=.35;
       if(sc>bs){bs=sc;best=t;bestSend=send;}}
     if(!best)continue;
@@ -3320,6 +3548,22 @@ async function aiTurn(f){
     s.units=s.units.filter(u=>!send.includes(u));send.forEach(u=>u.moved=true);
     await doBattle({attFid:f,units:send,from:s,to:best});
     if(G.lost)return;
+  }
+  for(const p of shuffle(PNODES)){ // armies camped on passes: a fort's garrison stays; the rest strike a hostile end of the road, or fall back to a friendly one
+    const ps=G.s[p.id];if(ps.owner!==f||!ps.units.length||G.lost)continue;
+    const keep=ps.bld.walls?ps.units.slice().sort((a,b)=>unitPower(b)-unitPower(a)).slice(0,2):[];
+    const free=ps.units.filter(u=>!u.moved&&!keep.includes(u));if(!free.length)continue;
+    let best=null,bs=0;const ap=armyPower(free);
+    for(const id of ADJ[p.id]){const e=G.s[id];if(e.owner===f||(e.owner===PLAYER&&G.turn<4))continue;
+      const dp=e.units.length?armyPower(e.units)*(1+.15*e.bld.walls):0;if(dp>0&&ap<dp*AI_EDGE/F.aggr)continue;
+      const sc=(ap+1)/(dp+50)+(e.owner===PLAYER?.3:0)+e.pop/20000;if(sc>bs){bs=sc;best=e;}}
+    if(!best){
+      if(ps.bld.walls)continue; // a fort is a post, not a stopping place
+      best=ADJ[p.id].map(id=>G.s[id]).filter(e=>e.owner===f&&e.units.length<MAX_UNITS).sort((a,b)=>a.units.length-b.units.length)[0];if(!best)continue;}
+    const mv=best.owner===f?free.slice(0,MAX_UNITS-best.units.length):free;if(!mv.length)continue;
+    await cmMarchAI(p.id,best.id,f,mv);
+    ps.units=ps.units.filter(u=>!mv.includes(u));mv.forEach(u=>u.moved=true);
+    if(best.owner===f)best.units.push(...mv);else await doBattle({attFid:f,units:mv,from:ps,to:best});
   }
   hd=hostileDist(f);
   const toStage={},st=goal&&goal.stage&&goal.stage.owner===f?goal.stage.id:null; // steps through our own land to the gathering city
@@ -3345,6 +3589,14 @@ function econTick(f){
       s.owner='rebels';s.units=['rb_mil','rb_mil','rb_sling'].map(t=>mkUnit(t,false));s.unrest=0;s.build=null;s.tax=1;
       if(f===PLAYER)report('🔥',`${sname(s)} revolted and declared itself free!`);}
   }
+  for(const s of passStates()){ // armies in the field recover slowly, in a fort a little faster; builders finish; AI forts raise a militia to hold the road
+    if(s.owner!==f||!s.units.length)continue;
+    if(s.build){s.build.t--;if(s.build.t<=0){s.bld.walls=s.build.lv;if(f===PLAYER)report('🏰',`${FORT_NAME[s.build.lv]} completed at ${sname(s)}.`);s.build=null;}}
+    for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*(s.bld.walls?.1:.06)));
+    if(f!==PLAYER&&s.bld.walls&&s.units.length<2&&G.turn%3===0&&G.gold[f]>500){
+      const t=FACTIONS[f].roster.find(t=>{const T=UNITS[t];return(!T.req||T.req.lv===0)&&(T.kind==='inf'||T.kind==='spear');});
+      if(t){G.gold[f]-=Math.round(UNITS[t].cost*.5);s.units.push(mkUnit(t,true));}}
+  }
   if(G.gold[f]<0){let worst=null,ws=null;for(const s of ownedBy(f))for(const u of s.units)if(u.type!=='general'&&(!worst||UNITS[u.type].upk>UNITS[worst.type].upk)){worst=u;ws=s;}
     if(worst){ws.units=ws.units.filter(u=>u!==worst);if(f===PLAYER)report('💰',`Unpaid, the ${UNITS[worst.type].name} in ${sname(ws)} deserted. Keep the treasury above zero.`);}}
 }
@@ -3358,7 +3610,7 @@ async function endTurn(){
     econTick(PLAYER);
     for(const f of AI_ORDER){if(!ownedBy(f).length)continue;econTick(f);await sleep(120);await aiTurn(f);repaintTerritory();renderNodes();if(G.lost||!ownedBy(PLAYER).length)break;}
     rebelTick();G.turn++;
-    for(const n of NODES)for(const u of G.s[n.id].units)u.moved=false;
+    for(const n of ALLN)for(const u of G.s[n.id].units)u.moved=false;
   }finally{$('#busy').classList.add('hidden');UI.busy=false;}
   G.last=G.reports.slice();save();render();
   if(await checkEnd())return;
@@ -3384,6 +3636,7 @@ const help=()=>`<p>You lead ${G?theF(PLAYER):'one of six powers'} in 280 BC. <b>
 <li><b>Cities</b> earn gold from taxes. Build farms to grow, markets for income, temples for order, barracks and stables for better troops, walls for defence.</li>
 <li><b>Public order</b> drops with high taxes, big cities and recent conquest. Below 20% a lightly held city can revolt.</li>
 <li><b>Armies</b> live in cities. Select units in the Army tab and march one city per turn. Marching into an enemy city starts a battle.</li>
+<li><b>Passes and forts</b> mark the roads between cities. An army can camp on one, and while it holds it the road is closed: an enemy marching that way must break it first, on an open field (or against a fort's walls). A camped army can build a timber or stone fort. Armies next to a battle march to join it as <b>relief</b>, arriving from the flank a little way into the fight.</li>
 <li><b>Battles</b> are fought in real time on a 3D field — command them yourself or auto-resolve. Tap a unit (or its card) to select it, then tap the ground to march or an enemy to attack. Drag to pan, pinch to zoom, twist or use ⟲ ⟳ to rotate. Pause any time; orders still work while paused.</li>
 <li><b>Tactics</b>: units that run into the enemy charge, cavalry hardest, but spearmen brace against horses. Hitting a flank or the rear breaks morale fast, and a general nearby steadies his men. Hills help, forests slow horses, walls slow attackers outside the gates, and missile troops fall back from melee.</li>
 <li><b>Routing</b> units flee toward their edge of the field and may rally. When one side has no steady units left, it loses. Attackers must win before time runs out.</li>
@@ -3477,12 +3730,13 @@ document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest
 document.querySelectorAll('.snd').forEach(b=>b.onclick=()=>{const m=AU.cycle();sndUI();toast(['Music and effects on','Effects only','Sound off'][m]);});
 window.addEventListener('pagehide',()=>{if(G&&!B)save();});
 // local dev only: launch a sample battle with testBattle() from the console
-if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))window.imp={get B(){return B;},get G(){return G;},cam,camT,R3,CM,cv,ct,ATMOS,cmSync,beginBattle,atmo:k=>{atmoSet(k);return R3.atmoK;},size(s){if(SIZES.includes(s))unitSize=s;return unitSize;},adv(s){const sp=B.speed;B.speed=1;for(let i=0;i<s/.05&&B&&R3.scene;i++){cancelAnimationFrame(R3.raf);R3.last=performance.now()-50;frame(performance.now());}if(B)B.speed=sp;}},window.testBattle=(p,e,eFid='gauls',walls=0,atmo)=>{
-  let id=9e5;const mk=t=>({uid:id++,type:t,men:UNITS[t].men,xp:0});
+if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))window.imp={get B(){return B;},get G(){return G;},repaintTerritory,drawMap,PNODES,gateOn,reliefFor,moveTargets,UI,doBattle,executeMove,tidyPasses,aiTurn,endTurn,cam,camT,R3,CM,cv,ct,ATMOS,cmSync,beginBattle,atmo:k=>{atmoSet(k);return R3.atmoK;},size(s){if(SIZES.includes(s))unitSize=s;return unitSize;},adv(s){const sp=B.speed;B.speed=1;for(let i=0;i<s/.05&&B&&R3.scene;i++){cancelAnimationFrame(R3.raf);R3.last=performance.now()-50;frame(performance.now());}if(B)B.speed=sp;}},window.testBattle=(p,e,eFid='gauls',walls=0,atmo,x)=>{ // x: {field, fort, land, pRelief:[types], eRelief:[types], delay, playerIsAttacker}
+  let id=9e5;const mk=t=>({uid:id++,type:t,men:UNITS[t].men,xp:0});x=x||{};
+  const rl=(a,sd)=>(a||[]).map((t,i)=>({cu:mk(t),delay:(x.delay||20)+i*3,rx:sd*(i%2?1:-1)}));
   p=p||['general','rm_hastati','rm_principes','rm_triarii','rm_velites','rm_equites','rm_legion'];
   e=e||['ga_war','ga_war','ga_chosen','ga_spear','ga_skirm','ga_cav','ga_noble'];
   $('#title')&&$('#title').classList.add('hidden');
-  return runBattle({title:'Test Battle',playerIsAttacker:true,pUnits:p.map(mk),eUnits:e.map(mk),eFid,walls,atmo});
+  return runBattle({title:'Test Battle',playerIsAttacker:x.playerIsAttacker!==false,pUnits:p.map(mk),eUnits:e.map(mk),eFid,walls,atmo,field:x.field,fort:x.fort,land:x.land,pRelief:rl(x.pRelief,1),eRelief:rl(x.eRelief,-1)});
 };
 initTitle();
 })();
