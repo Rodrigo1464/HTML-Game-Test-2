@@ -161,6 +161,10 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .row .main{flex:1;min-width:0}
 .row .t{font-weight:600;font-size:15.5px}
 .row .d{font-size:13px;color:var(--ink-2);line-height:1.3}
+.row.q{padding:7px 8px 7px 10px;margin-bottom:6px}
+.row.q .ico{font-size:19px}
+.qx{flex:0 0 auto;width:34px;height:34px;border-radius:9px;background:var(--panel);color:var(--ink-2);font-size:15px}
+.qcap{font-family:var(--display);font-size:12.5px;letter-spacing:.04em;color:var(--ink-2);margin:4px 2px 6px}
 .note{font-size:14px;color:var(--ink-2);padding:4px 2px 10px;line-height:1.4}
 .seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px}
 .seg button{padding:10px 2px;border-radius:10px;background:var(--panel-2);font-family:var(--display);font-size:12px}
@@ -834,13 +838,13 @@ function mkUnit(type,moved){return{uid:G.seq++,type,men:UNITS[type].men,xp:0,mov
 function mkPass(p){ // a pass is kept like a city so that armies, battles and saves treat it the same; owner is null while nobody holds it
   return{id:p.id,pass:true,owner:p.owner,pop:0,tax:1,bld:{farms:0,market:0,temple:0,barracks:0,stables:0,walls:p.fort},build:null,units:p.garrison.map(t=>mkUnit(t,false)),unrest:0,rec:0};
 }
-function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);for(const p of PNODES)if(!G.s[p.id])G.s[p.id]=mkPass(p);} // saves from before faction choice were always Rome, and from before passes had none
+function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);for(const p of PNODES)if(!G.s[p.id])G.s[p.id]=mkPass(p);for(const n of NODES)G.s[n.id].queue=G.s[n.id].queue||[];} // saves from before faction choice were always Rome, and from before passes or building queues had none
 function newGame(fid){
   setPlayer(fid);
   G={v:1,player:PLAYER,turn:1,seq:1,gold:{},cap:{},s:{},reports:[],last:[],won:false,lost:false};
   for(const f in FACTIONS){G.gold[f]=f===PLAYER||f==='carthage'?1600:1200;G.cap[f]=FACTIONS[f].capital;}
   for(const [id,,, ,owner,pop,bld,units] of SDEF){
-    G.s[id]={id,owner,pop,tax:1,bld:Object.assign({farms:0,market:0,temple:0,barracks:0,stables:0,walls:0},bld),build:null,units:[],unrest:0,rec:0};
+    G.s[id]={id,owner,pop,tax:1,bld:Object.assign({farms:0,market:0,temple:0,barracks:0,stables:0,walls:0},bld),build:null,queue:[],units:[],unrest:0,rec:0};
     G.s[id].units=units.map(t=>mkUnit(t,false));
   }
   for(const p of PNODES)G.s[p.id]=mkPass(p);
@@ -1058,7 +1062,7 @@ function modal({title,body,buttons}){
   });
 }
 let toastT;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2400);}
-function report(icon,text){G.reports.push({icon,text});}
+function report(icon,text){const r={icon,text};G.reports.push(r);return r;}
 
 function renderTop(){
   const yr=280-Math.floor((G.turn-1)/2),season=G.turn%2?'Summer':'Winter';
@@ -1123,7 +1127,7 @@ function renderSheet(){
   if(mine){
     const g=growth(s);
     h+=`<div class="chips"><span class="chip">Income <b>+${fmt(income(s))}</b></span><span class="chip ${o<40?'bad':o>=80?'good':''}">Order <b>${o}%</b></span><span class="chip">Growth <b>${g>=0?'+':''}${g.toFixed(1)}%</b></span>${s.bld.walls?`<span class="chip">${BUILD.walls.lv[s.bld.walls-1]}</span>`:''}</div>`;
-    const tabs=[['army',`Army (${s.units.length})`],['build','Build'],['recruit','Recruit'],['govern','Govern']];
+    const nb=(s.build?1:0)+s.queue.length,tabs=[['army',`Army (${s.units.length})`],['build',`Build${nb?` (${nb})`:''}`],['recruit','Recruit'],['govern','Govern']];
     h+=`<div class="tabs">${tabs.map(([k,l])=>`<button class="tab${UI.tab===k?' on':''}" data-tab="${k}">${l}</button>`).join('')}</div>`;
     h+=`<div class="sh-body">${({army:tabArmy,build:tabBuild,recruit:tabRecruit,govern:tabGovern})[UI.tab](s)}</div>`;
     if(UI.tab==='army'){
@@ -1153,6 +1157,7 @@ function renderSheet(){
     const ok=await modal({title:'Disband unit?',body:`<p>${UNITS[u.type].name} will be sent home. You save ${UNITS[u.type].upk} gold upkeep per turn.</p>`,buttons:[{label:'Disband',value:1,cls:'primary'},{label:'Keep',value:0}]});
     if(ok){s.units=s.units.filter(x=>x!==u);UI.pick.delete(uid);save();render();}};
   sh.querySelectorAll('[data-build]').forEach(b=>b.onclick=()=>doBuild(s,b.dataset.build));
+  sh.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>cancelBuild(s,+b.dataset.cancel));
   sh.querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>doRecruit(s,b.dataset.rec));
   sh.querySelectorAll('[data-tax]').forEach(b=>b.onclick=()=>{s.tax=+b.dataset.tax;save();render();});
 }
@@ -1160,14 +1165,24 @@ function tabArmy(s){
   if(!s.units.length)return'<div class="note">No troops here. Recruit units, or march an army in from a neighbouring city.</div>';
   return`<div class="note">Tap units to select them, then march to a neighbouring city, or camp on a pass along the road. Each army marches once per turn.</div><div class="ugrid">${s.units.map(u=>unitCard(u,PLAYER,{pick:UI.pick.has(u.uid),dim:u.moved,tag:u.moved?'Done this turn':null})).join('')}</div>`;
 }
+const turnsTxt=n=>`${n} turn${n>1?'s':''}`;
 function tabBuild(s){
-  let h=s.build?`<div class="note">🔨 Building <b>${BUILD[s.build.k].lv[s.bld[s.build.k]]}</b> — ${s.build.t} turn${s.build.t>1?'s':''} left. One project at a time.</div>`:`<div class="note">A ${tierName(s).toLowerCase()} can build up to level ${tier(s)}. Cities grow past 2,000 and 6,000 people to unlock more.</div>`;
-  for(const k of BKEYS){const B=BUILD[k],lv=s.bld[k],cur=lv?B.lv[lv-1]:'None';
+  const n=(s.build?1:0)+s.queue.length,full=n>=BUILD_MAX;
+  let h=`<div class="note">A ${tierName(s).toLowerCase()} can build up to level ${tier(s)}. Cities grow past 2,000 and 6,000 people to unlock more.</div>`;
+  if(s.build){ // the project under way, then the queue behind it, each with the turn it will be done
+    const row=(i,k,lv,d)=>`<div class="row q"><div class="ico">${BUILD[k].ico}</div><div class="main"><div class="t">${BUILD[k].lv[lv]}</div><div class="d">${d}</div></div><button class="qx" data-cancel="${i}" aria-label="Cancel ${BUILD[k].lv[lv]}">✕</button></div>`;
+    let at=s.build.t;
+    h+=`<div class="qcap">Under construction · ${n} of ${BUILD_MAX}</div>`+row(-1,s.build.k,s.bld[s.build.k],`🔨 Building now · ${turnsTxt(at)} left`);
+    s.queue.forEach((q,i)=>{at+=BUILD[q.k].turns[q.lv];h+=row(i,q.k,q.lv,`Queued · done in ${turnsTxt(at)}`);});
+    h+=`<div class="note">Each project starts when the one before it is finished. Gold is paid when you queue; ✕ cancels for a full refund.</div><div class="qcap">Buildings</div>`;
+  }
+  for(const k of BKEYS){const B=BUILD[k],lv=s.bld[k],pl=plannedLv(s,k),cur=lv?B.lv[lv-1]:'None';
     let btn,d;
-    if(lv>=3){btn='<button class="btn ghost sm" disabled>Max</button>';d=B.eff;}
-    else{const cost=B.cost[lv];d=`Next: ${B.lv[lv]} · ${fmt(cost)} gold · ${B.turns[lv]} turn${B.turns[lv]>1?'s':''}`;
-      if(lv>=tier(s))d+=' · needs a larger city';
-      btn=`<button class="btn gold sm" data-build="${k}" ${s.build||lv>=tier(s)||G.gold[PLAYER]<cost?'disabled':''}>Build</button>`;}
+    if(lv>=3){btn='<button class="btn ghost sm" disabled>Max</button>';d='Fully built';}
+    else if(pl>=3){btn='<button class="btn ghost sm" disabled>Queued</button>';d='Every level is under way';}
+    else{const cost=B.cost[pl];d=`Next: ${B.lv[pl]}${pl>lv?` after ${B.lv[pl-1]}`:''} · ${fmt(cost)} gold · ${turnsTxt(B.turns[pl])}`;
+      if(pl>=tier(s))d+=' · needs a larger city';else if(full)d+=' · the queue is full';
+      btn=`<button class="btn gold sm" data-build="${k}" ${pl>=tier(s)||full||G.gold[PLAYER]<cost?'disabled':''}>${s.build?'Queue':'Build'}</button>`;}
     h+=`<div class="row"><div class="ico">${B.ico}</div><div class="main"><div class="t">${B.name}: ${cur}</div><div class="d">${d}</div><div class="d">${B.eff}</div></div>${btn}</div>`;}
   return h;
 }
@@ -1189,8 +1204,28 @@ function tabGovern(s){
   h+=`<table class="ledger"><caption>Your treasury per turn</caption><tr><td>All city income</td><td>${fmt(grossIncome(PLAYER))}</td></tr><tr><td>All army upkeep</td><td class="neg">−${fmt(upkeep(PLAYER))}</td></tr><tr class="tot"><td>Net</td><td class="${netIncome(PLAYER)<0?'neg':'pos'}">${fmt(netIncome(PLAYER))}</td></tr></table>`;
   return h;
 }
-function doBuild(s,k){const lv=s.bld[k],c=BUILD[k].cost[lv];if(s.build||lv>=tier(s)||G.gold[PLAYER]<c)return;
-  G.gold[PLAYER]-=c;s.build={k,t:BUILD[k].turns[lv]};toast(`Construction started: ${BUILD[k].lv[lv]}`);AU.ui('hammer');save();render();}
+/* Building queue: a city works on one project (build) at a time, with more lined up behind it (queue: {k, lv, c} — building, level index, gold paid). Gold is paid when a project is queued; the next one starts the turn the last is finished. */
+const BUILD_MAX=5; // projects a city can have lined up, the one under way included
+const plannedLv=(s,k)=>s.bld[k]+(s.build&&s.build.k===k?1:0)+s.queue.filter(q=>q.k===k).length; // the level a building reaches once everything lined up is done
+function doBuild(s,k){const lv=plannedLv(s,k),c=BUILD[k].cost[lv];if(lv>=3||lv>=tier(s)||G.gold[PLAYER]<c||(s.build?1:0)+s.queue.length>=BUILD_MAX)return;
+  G.gold[PLAYER]-=c;
+  if(s.build){s.queue.push({k,lv,c});toast(`Queued: ${BUILD[k].lv[lv]} (${s.queue.length+1} of ${BUILD_MAX})`);}
+  else{s.build={k,t:BUILD[k].turns[lv]};toast(`Construction started: ${BUILD[k].lv[lv]}`);}
+  AU.ui('hammer');save();render();}
+function cancelBuild(s,i){ // i: -1 for the project under way, else its place in the queue; later levels of the same building go too, since they stand on it
+  const k=i<0?s.build.k:s.queue[i].k,names=[];let back=0;
+  if(i<0){back+=BUILD[k].cost[s.bld[k]];names.push(BUILD[k].lv[s.bld[k]]);}
+  s.queue=s.queue.filter((q,j)=>{if(q.k===k&&j>=i){back+=q.c;names.push(BUILD[k].lv[q.lv]);return false;}return true;});
+  if(i<0)nextBuild(s);
+  G.gold[PLAYER]+=back;toast(`Cancelled ${names.join(' and ')} — ${fmt(back)} gold returned`);save();render();}
+function nextBuild(s){ // the next project in line starts; one the city has become too small for is paid back
+  s.build=null;
+  while(s.queue.length){const q=s.queue.shift();
+    if(q.lv===s.bld[q.k]&&q.lv<tier(s)){s.build={k:q.k,t:BUILD[q.k].turns[q.lv]};return;}
+    G.gold[s.owner]+=q.c;if(s.owner===PLAYER)report('↩️',`${sname(s)} can no longer build ${BUILD[q.k].lv[q.lv]}; its ${fmt(q.c)} gold was returned.`);}
+}
+function dropQueue(s){ // the city changes hands: the project under way is lost, the ones not yet begun are paid back to the old owner
+  let back=0;for(const q of s.queue)back+=q.c;if(back&&G.gold[s.owner]!=null)G.gold[s.owner]+=back;s.queue=[];s.build=null;return back;}
 function doRecruit(s,t){const T=UNITS[t];
   if(G.gold[PLAYER]<T.cost)return toast('Not enough gold');if(s.units.length>=MAX_UNITS)return toast('This city holds at most 12 units');
   if(s.rec>=2)return toast('Each city can train 2 units per turn');if(t==='general'&&countGenerals(PLAYER)>=3)return toast('You can field 3 generals at most');
@@ -1325,8 +1360,8 @@ function takePass(to,fid,units,from){ // an army wins a pass or fort, or walks i
 }
 async function capture(to,fid,units,from){
   if(to.pass)return takePass(to,fid,units,from);
-  const prev=to.owner;if(fid===PLAYER)AU.ui('fanfare');
-  to.owner=fid;to.build=null;to.tax=1;to.unrest=30;to.rec=0;
+  const prev=to.owner,back=dropQueue(to);if(fid===PLAYER)AU.ui('fanfare');
+  to.owner=fid;to.tax=1;to.unrest=30;to.rec=0;
   const fit=units.slice(0,MAX_UNITS);fit.forEach(u=>u.moved=true);to.units=fit;
   if(units.length>MAX_UNITS&&from&&from.owner===fid)from.units.push(...units.slice(MAX_UNITS));
   if(prev!=='rebels'&&G.cap[prev]===to.id){const own=ownedBy(prev);G.cap[prev]=own.length?own.sort((a,b)=>b.pop-a.pop)[0].id:null;}
@@ -1338,7 +1373,7 @@ async function capture(to,fid,units,from){
     if(ch==='sack'){G.gold[PLAYER]+=loot;to.pop=Math.round(to.pop*.75);to.unrest=45;}else G.gold[PLAYER]+=occ;
   }else{
     G.gold[fid]+=Math.round(to.pop*.04);
-    if(prev===PLAYER)report('🔥',`${theF(fid,1)} captured ${sname(to)}!`);
+    if(prev===PLAYER)report('🔥',`${theF(fid,1)} captured ${sname(to)}!${back?` The ${fmt(back)} gold set aside for its building queue was returned.`:''}`);
     else report('⚑',`${theF(fid,1)} took ${sname(to)} from ${prev==='rebels'?'its free people':theF(prev)}.`);
   }
   if(prev!=='rebels'&&prev!==PLAYER&&!ownedBy(prev).length){const sg=FACTIONS[prev].sg;
@@ -3608,12 +3643,13 @@ async function aiTurn(f){
 function econTick(f){
   G.gold[f]+=netIncome(f);
   for(const s of ownedBy(f)){
-    if(s.build){s.build.t--;if(s.build.t<=0){const k=s.build.k;s.bld[k]++;if(f===PLAYER)report('🏛️',`${BUILD[k].lv[s.bld[k]-1]} completed in ${sname(s)}.`);s.build=null;}}
+    if(s.build){s.build.t--;if(s.build.t<=0){const k=s.build.k;s.bld[k]++;const r=f===PLAYER?report('🏛️',`${BUILD[k].lv[s.bld[k]-1]} completed in ${sname(s)}.`):null;
+      nextBuild(s);if(r&&!s.build&&BKEYS.some(b=>s.bld[b]<Math.min(3,tier(s))))r.text+=' Nothing else is queued there.';}}
     s.pop=Math.round(s.pop*(1+growth(s)/100));s.unrest=Math.max(0,s.unrest-5);s.rec=0;
     for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*.12));
     if(order(s)<20&&s.units.length<2&&G.cap[f]!==s.id&&Math.random()<.35){
-      s.owner='rebels';s.units=['rb_mil','rb_mil','rb_sling'].map(t=>mkUnit(t,false));s.unrest=0;s.build=null;s.tax=1;
-      if(f===PLAYER)report('🔥',`${sname(s)} revolted and declared itself free!`);}
+      const back=dropQueue(s);s.owner='rebels';s.units=['rb_mil','rb_mil','rb_sling'].map(t=>mkUnit(t,false));s.unrest=0;s.tax=1;
+      if(f===PLAYER)report('🔥',`${sname(s)} revolted and declared itself free!${back?` The ${fmt(back)} gold set aside for its building queue was returned.`:''}`);}
   }
   for(const s of passStates()){ // armies in the field recover slowly, in a fort a little faster; builders finish; AI forts raise a militia to hold the road
     if(s.owner!==f)continue;
@@ -3660,7 +3696,7 @@ async function checkEnd(){
 
 /* ================= MENU / TITLE ================= */
 const help=()=>`<p>You lead ${G?theF(PLAYER):'one of six powers'} in 280 BC. <b>Win by holding 18 of the 26 cities.</b></p><ul>
-<li><b>Cities</b> earn gold from taxes. Build farms to grow, markets for income, temples for order, barracks and stables for better troops, walls for defence.</li>
+<li><b>Cities</b> earn gold from taxes. Build farms to grow, markets for income, temples for order, barracks and stables for better troops, walls for defence. A city builds one thing at a time, but you can queue up to ${BUILD_MAX} projects — gold is paid when you queue, and cancelling refunds it.</li>
 <li><b>Public order</b> drops with high taxes, big cities and recent conquest. Below 20% a lightly held city can revolt.</li>
 <li><b>Armies</b> live in cities. Select units in the Army tab and march one city per turn. Marching into an enemy city starts a battle.</li>
 <li><b>Passes and forts</b> mark the roads between cities. An army can camp on one, and while it holds it the road is closed: an enemy marching that way must break it first, on an open field (or against a fort's walls). A camped army can build a timber or stone fort. Armies next to a battle march to join it as <b>relief</b>, arriving from the flank a little way into the fight.</li>
