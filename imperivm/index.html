@@ -3345,8 +3345,9 @@ const RIVERS=[ // lon/lat from the spring to the sea; w: width at the spring and
  {name:'Tiberis',w:[.7,2.6],pts:[[12.07,43.78],[12.13,43.57],[12.24,43.46],[12.33,43.3],[12.42,43.1],[12.4,42.85],[12.25,42.7],[12.39,42.48],[12.47,42.33],[12.57,42.2],[12.58,42.05],[12.5,41.95],[12.47,41.88],[12.35,41.78],[12.24,41.73],[12.16,41.69]]},
  {name:'Arnus',w:[.7,2.2],pts:[[11.7,43.87],[11.73,43.76],[11.81,43.68],[11.86,43.55],[11.82,43.5],[11.72,43.51],[11.57,43.53],[11.47,43.62],[11.43,43.75],[11.25,43.77],[11.1,43.78],[10.95,43.72],[10.63,43.67],[10.4,43.71],[10.25,43.68],[10.15,43.68]]}
 ];
+const RIVER_CUT=12; // towns and forts a river can run under, at most
 function cmRivers(scene,mask){ // each river: a smooth, gently meandering strip draped over the land, widening toward the sea
-  const T=THREE,V=[],A=[],I=[];let nv=0;
+  const T=THREE,V=[],A=[],I=[],near=new Map();let nv=0;
   RIVERS.forEach((rv,ri)=>{
     const raw=rv.pts.map(([lo,la])=>P(lo,la)),pts=[];
     for(let i=0;i<raw.length-1;i++){const p0=raw[Math.max(0,i-1)],p1=raw[i],p2=raw[i+1],p3=raw[Math.min(raw.length-1,i+2)],k=Math.max(2,Math.ceil(Math.hypot(p2[0]-p1[0],p2[1]-p1[1])/1.2));
@@ -3358,17 +3359,20 @@ function cmRivers(scene,mask){ // each river: a smooth, gently meandering strip 
     let prev=-1;
     for(let i=0;i<Q.length;i++){const [x,z]=Q[i],[tx,tz]=tan(Q,i),w=lerp(rv.w[0],rv.w[1],Math.pow(S[i]/L,.8))/2;
       for(const sd of [1,-1]){const px=x-tz*w*sd,pz=z+tx*w*sd;V.push(px,Math.max(hm(px,pz),.05)+.28,pz);A.push(S[i],sd);}
-      mask.add(((x/7)|0)+','+((z/7)|0));
+      mask.add(((x/7)|0)+','+((z/7)|0));for(const n of ALLN){const d=Math.hypot(x-n.x,z-n.z);if(d<(near.get(n)??1e9))near.set(n,d);}
       const wet=hm(x,z)>-.6; // the strip stops a little way out to sea
       if(wet&&prev>=0)I.push(prev,nv,prev+1,prev+1,nv,nv+1);prev=wet?nv:-1;nv+=2;}
   });
   const g=new T.BufferGeometry(),N=new Float32Array(V.length);for(let i=1;i<N.length;i+=3)N[i]=1;
   g.setAttribute('position',new T.Float32BufferAttribute(V,3));g.setAttribute('normal',new T.BufferAttribute(N,3));g.setAttribute('aR',new T.Float32BufferAttribute(A,2));g.setIndex(I);g.computeBoundingSphere();
   const m=new T.MeshLambertMaterial({transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2.5,polygonOffsetUnits:-2.5});
-  m.onBeforeCompile=sh=>{Object.assign(sh.uniforms,{uT:CM.uT,uSunD:{value:CM.sunD},uRiv:{value:new T.Color(0x2f7f9c)},uRiv2:{value:new T.Color(0x5aa6b6)},uBank:{value:new T.Color(0x8c8a5c)}});
+  CM.cut=[...near].filter(([n,d])=>d<(n.pass?8.8:16.8)*2.6+3).sort((a,b)=>a[1]-b[1]).slice(0,RIVER_CUT).map(x=>x[0]); // only plates that can reach the river, even fully zoomed out
+  CM.uCut={value:Array.from({length:RIVER_CUT},()=>new T.Vector3())}; // a river runs under the ground plate of a town or fort beside it, so it is cut out there (the radii follow the zoom, in cmFrame)
+  m.onBeforeCompile=sh=>{Object.assign(sh.uniforms,{uT:CM.uT,uSunD:{value:CM.sunD},uRiv:{value:new T.Color(0x2f7f9c)},uRiv2:{value:new T.Color(0x5aa6b6)},uBank:{value:new T.Color(0x8c8a5c)},uCut:CM.uCut});
     sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 aR;varying vec2 vR;varying vec3 vWp;').replace('#include <begin_vertex>','#include <begin_vertex>\nvR=aR;vWp=transformed;');
-    sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>\nuniform float uT;uniform vec3 uSunD,uRiv,uRiv2,uBank;varying vec2 vR;varying vec3 vWp;${GL_GLINT}`)
-      .replace('#include <color_fragment>',`#include <color_fragment>
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>\nuniform float uT;uniform vec3 uSunD,uRiv,uRiv2,uBank,uCut[${RIVER_CUT}];varying vec2 vR;varying vec3 vWp;${GL_GLINT}`)
+      .replace('#include <color_fragment>',`for(int i=0;i<${RIVER_CUT};i++){vec2 q=vWp.xz-uCut[i].xy;if(dot(q,q)<uCut[i].z*uCut[i].z)discard;}
+#include <color_fragment>
 float e=abs(vR.y),st=sin(vR.x*.9-uT*1.5+sin(vR.x*.17+vR.y*1.3)*2.); // e: 0 midstream, 1 at the bank; st: ripples running downstream
 diffuseColor.rgb=mix(mix(uRiv,uRiv2,.35+.3*sin(vR.x*.05)),uBank,smoothstep(.5,1.,e))+smoothstep(.8,1.,st)*.05*(1.-e);diffuseColor.a=1.-smoothstep(.75,1.,e);`)
       .replace('#include <opaque_fragment>','outgoingLight+=vec3(1.,.93,.8)*glint(vWp,uSunD,uT,.03)*(1.-e)*.8;\n#include <opaque_fragment>');};
@@ -3623,7 +3627,7 @@ function cmSync(){
     const B=s.bld,ck=[s.owner,tr,s.pop>=GREAT?1:0,wl,cap?1:0,B.market,B.temple,B.barracks,B.stables,s.god,s.wonder].join('|'); // the model shows its public buildings and wonder too
     if(c.ck!==ck){
       c.ck=ck;if(c.mesh){c.grp.remove(c.mesh);c.mesh.geometry.dispose();}
-      c.mesh=new THREE.Mesh(cmCityGeo(n,s,cap),CM.mat);c.mesh.castShadow=true;c.grp.add(c.mesh);
+      c.mesh=new THREE.Mesh(cmCityGeo(n,s,cap),CM.mat);c.mesh.castShadow=true;c.grp.add(c.mesh);c.pr=[0,5.5,8,11][tr]+(s.pop>=GREAT?1.5:0)+4.3; // how far the ground plate reaches, for cutting rivers
       c.r0=[0,9,12,15][tr]+(wl?3:1)+(s.pop>=GREAT?2:0);c.sel.scale.setScalar(c.r0);c.tgt.scale.setScalar(c.r0+3);c.dng.scale.setScalar(c.r0+6);
     }
     const fk=[s.bld.farms,G.turn%2,tr,s.pop>=GREAT?1:0,s.wonder?1:0].join('|');if(c.fk!==fk){c.fk=fk;cmFields(n,c,s);} // fields grow with the Farms and turn with the seasons
@@ -3801,6 +3805,7 @@ function cmFrame(now){
   const s=CM.sc;
   for(const n of NODES){const c=CM.city[n.id];c.grp.scale.setScalar(s);
     if(c.army){const dd=17+8*s;c.army.position.set(n.x+n.ux*dd,n.gh+.15,n.z+n.uz*dd);c.army.scale.setScalar(s*.9);c.army.rotation.y=c.fy;}}
+  CM.cut.forEach((n,i)=>CM.uCut.value[i].set(n.x,n.z,CM.city[n.id].pr*s)); // rivers stay under the town plates as those grow with the zoom
   for(const n of PNODES){const c=CM.city[n.id];c.grp.scale.setScalar(s);
     if(c.army){const dd=14+7*s;c.army.position.set(n.x+n.ux*dd,n.gh+.15,n.z+n.uz*dd);c.army.scale.setScalar(s*.85);c.army.rotation.y=c.fy;}}
   if(CM.tick%2===0)cmWaterTick(CM.t);
@@ -3842,7 +3847,7 @@ function cmInit(){
     const grp=new T.Group();grp.position.set(n.x,n.gh,n.z);sc.add(grp);
     const sel=new T.Mesh(rg,CM.ringSel),tgt=new T.Mesh(rg,CM.ringGo),dng=new T.Mesh(dg,CM.ringDng);for(const m of [sel,tgt,dng]){m.position.y=.9;m.visible=false;m.renderOrder=5;grp.add(m);}
     const lab=document.createElement('div');lab.className='clab'+(n.pass?' pass':'');lab.innerHTML='<span class="cs"></span><span class="cn"></span><span class="cb"></span>';lab.querySelector('.cn').textContent=n.name;labs.appendChild(lab);
-    CM.city[n.id]={grp,sel,tgt,dng,lab,ls:lab.querySelector('.cs'),lb:lab.querySelector('.cb'),mesh:null,army:null,fields:null,rects:[],ck:null,ak:null,lk:null,fk:null,fy:0,r0:12,vis:false,pri:0,lw:0,bx:0,by:0,lx:0,ly:0,small:false};
+    CM.city[n.id]={grp,sel,tgt,dng,lab,ls:lab.querySelector('.cs'),lb:lab.querySelector('.cb'),mesh:null,army:null,fields:null,rects:[],ck:null,ak:null,lk:null,fk:null,fy:0,r0:12,pr:n.pass?8.8:0,vis:false,pri:0,lw:0,bx:0,by:0,lx:0,ly:0,small:false};
     if(n.pass){const zone=new T.Mesh(rg,new T.MeshBasicMaterial({color:0x888888,transparent:true,opacity:.5,depthTest:false,side:T.DoubleSide,toneMapped:false}));zone.scale.setScalar(26);zone.position.y=.9;zone.renderOrder=4;zone.visible=false;grp.add(zone);CM.city[n.id].zone=zone;}
   }
   cmPointer(r.domElement);
