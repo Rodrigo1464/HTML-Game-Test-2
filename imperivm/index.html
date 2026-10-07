@@ -83,6 +83,7 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 #mapInner{position:relative}
 #mapCanvas,#mapSvg{position:absolute;left:0;top:0;width:100%;height:100%;display:block}
 .road{fill:none;stroke:#6e4c2a;stroke-width:2.2;stroke-dasharray:6 4;opacity:.7;stroke-linecap:round}
+.road.paved{stroke:#e8dfc8;stroke-width:3.4;stroke-dasharray:none;opacity:.95}
 .sea-route{fill:none;stroke:#d9eef0;stroke-width:2;stroke-dasharray:1.5 5;stroke-linecap:round;opacity:.85}
 .route-hl{fill:none;stroke:#f0c75a;stroke-width:4.5;stroke-linecap:round;stroke-dasharray:10 6;animation:march .8s linear infinite}
 .route-hl.foe{stroke:#e2553f}
@@ -171,6 +172,9 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .row .t{font-weight:600;font-size:15.5px}
 .row .d{font-size:13px;color:var(--ink-2);line-height:1.3}
 .row.q{padding:7px 8px 7px 10px;margin-bottom:6px}
+.row.pick{width:100%;text-align:left;cursor:pointer;color:var(--ink);border:1px solid var(--line)}
+.row.pick:active{background:var(--panel)}
+.row.pick .gt{color:var(--ink-2);font-size:20px}
 .row.q .ico{font-size:19px}
 .qx{flex:0 0 auto;width:34px;height:34px;border-radius:9px;background:var(--panel);color:var(--ink-2);font-size:15px}
 .qcap{font-family:var(--display);font-size:12.5px;letter-spacing:.04em;color:var(--ink-2);margin:4px 2px 6px}
@@ -858,6 +862,63 @@ const BUILD={
   walls:{name:'Walls',ico:'🧱',lv:['Palisade','Stone Walls','Great Walls'],cost:[400,1000,2000],turns:[1,2,3],eff:'Defenders fight much harder'}
 };
 const BKEYS=Object.keys(BUILD);
+/* Regional goods: every city has one, and it shapes what the city is good for */
+const RES={
+  salt:{name:'Salt',ico:'🧂',eff:'+8 public order'},
+  grain:{name:'Grain',ico:'🌾',eff:'+0.5% growth'},
+  wine:{name:'Wine',ico:'🍇',eff:'+30 gold · a trade good',gold:30,trade:1},
+  oil:{name:'Olive oil',ico:'🏺',eff:'+30 gold · a trade good',gold:30,trade:1},
+  dye:{name:'Purple dye',ico:'🐚',eff:'+50 gold · a trade good',gold:50,trade:1},
+  iron:{name:'Iron',ico:'⛏️',eff:'Troops trained here start with +1 experience'},
+  horses:{name:'Horses',ico:'🐴',eff:'Cavalry trained here costs 25% less'},
+  timber:{name:'Timber',ico:'🌲',eff:'Building here costs 20% less'}
+};
+const RESOURCE={roma:'salt',capua:'grain',tarquinii:'wine',clusium:'grain',pisae:'iron',corfinium:'timber',beneventum:'wine',luceria:'horses',
+  mediolanum:'iron',bononia:'grain',taurini:'timber',tarentum:'dye',syracusae:'grain',paestum:'oil',croton:'timber',rhegium:'wine',
+  carthago:'horses',lilybaeum:'salt',panormus:'grain',akragas:'oil',genua:'oil',patavium:'horses',ariminum:'salt',asculum:'oil',messana:'wine',brundisium:'dye'};
+const NORES={name:'',ico:'',eff:''},resOf=s=>RES[RESOURCE[s.id]]||NORES,hasRes=(s,r)=>RESOURCE[s.id]===r;
+/* Temples are dedicated to one god, chosen with the first shrine; each god brings a gift on top of the public order every temple gives */
+const TEMPLE_ORDER=8;
+const GODS={
+  jove:{ico:'⚡',col:0xf2c94c,gift:'+6 more public order per level',n:{rome:'Jupiter',etruria:'Tinia',samnium:'Jupiter',gauls:'Taranis',greeks:'Zeus',carthage:'Baal Hammon'}},
+  mars:{ico:'⚔️',col:0xb0281f,gift:'Troops trained here start with +1 experience (+2 at the Great Temple)',n:{rome:'Mars',etruria:'Laran',samnium:'Mamers',gauls:'Camulos',greeks:'Ares',carthage:'Reshef'}},
+  ceres:{ico:'🌿',col:0x7aa040,gift:'+0.4% growth per level',n:{rome:'Ceres',etruria:'Vei',samnium:'Kerri',gauls:'Rosmerta',greeks:'Demeter',carthage:'Tanit'}},
+  merc:{ico:'💰',col:0x3c6fb0,gift:'+15% tax income per level',n:{rome:'Mercury',etruria:'Turms',samnium:'Mercury',gauls:'Lugus',greeks:'Hermes',carthage:'Melqart'}}
+};
+const GOD_KEYS=Object.keys(GODS),TEMPLE_GOD={syracusae:'ceres',carthago:'ceres',corfinium:'mars'}; // the cults the old temples began with; the rest honour the sky father
+const godName=(g,f)=>GODS[g].n[f]||GODS[g].n.rome; // the god goes by the name its present owners give it
+const lvName=(s,k,i)=>BUILD[k].lv[i]+(k==='temple'&&s.god?' of '+godName(s.god,s.owner):'');
+const marsXp=s=>s.god==='mars'&&s.bld.temple?(s.bld.temple>=3?2:1):0;
+/* Wonders: each stands only once in the world. A Great City can raise one, and its gift reaches every city its owner holds — whoever takes the city takes the wonder */
+const WONDERS={
+  circus:{name:'Great Circus',ico:'🏟️',eff:'+6 public order in every city you hold'},
+  harbour:{name:'Great Harbour',ico:'⚓',eff:'+10% income in every city you hold'},
+  aqueduct:{name:'Great Aqueduct',ico:'⛲',eff:'+0.4% growth in every city you hold'},
+  gymnasium:{name:'Great Gymnasium',ico:'🏅',eff:'Troops trained in any of your cities start with +1 experience'},
+  asclep:{name:'Sanctuary of Asclepius',ico:'⚕️',eff:'Your troops recover from their losses twice as fast'}
+};
+const WKEYS=Object.keys(WONDERS),WONDER_COST=4000,WONDER_TURNS=6;
+const hasWonder=(f,w)=>{for(const n of NODES){const s=G.s[n.id];if(s.wonder===w)return s.owner===f;}return false;};
+function wonderSite(w){ // the city that holds a wonder, is raising it or has it queued: {s, built}; null while it is free for anyone
+  for(const n of NODES){const s=G.s[n.id];if(s.wonder===w)return{s,built:true};
+    if((s.build&&s.build.w===w)||s.queue.some(q=>q.w===w))return{s,built:false};}
+  return null;}
+const isGreat=s=>s.pop>=GREAT;
+const wonderPlanned=s=>!!(s.wonder||(s.build&&s.build.k==='wonder')||s.queue.some(q=>q.k==='wonder'));
+/* Paved roads: a city paves the road to a neighbour of the same owner. An army marches on along it, and the cities at both ends trade */
+const rk=(a,b)=>a<b?a+'|'+b:b+'|'+a; // a road's key in G.roads
+const SEA=new Set(EDGES.filter(e=>e[2]).map(e=>rk(e[0],e[1])));
+const ROAD_TRADE=20,GOOD_TRADE=10;
+const paved=(a,b)=>!!(G.roads&&G.roads[rk(a,b)]);
+const roadLen=(a,b)=>Math.hypot(NODE[a].x-NODE[b].x,NODE[a].y-NODE[b].y);
+const roadCost=(a,b)=>50*Math.round((250+roadLen(a,b)*3)/50),roadTurns=(a,b)=>clamp(Math.round(roadLen(a,b)/45),2,4);
+const quickRoad=(a,b,f)=>!PNODE[a]&&!PNODE[b]&&paved(a,b)&&G.s[a].owner===f&&G.s[b].owner===f&&!blocksFor(gateOn(a,b),f); // a march between two of f's cities on a paved road leaves the army a second stop
+const tradeOn=(s,id)=>ROAD_TRADE+(resOf(s).trade?GOOD_TRADE:0)+(resOf(G.s[id]).trade?GOOD_TRADE:0);
+function roadTrade(s){let g=0; // gold s earns from its paved roads to cities of the same owner; a hostile camp on the road cuts it
+  for(const id of ADJ[s.id])if(paved(s.id,id)&&G.s[id].owner===s.owner&&!blocksFor(gateOn(s.id,id),s.owner))g+=tradeOn(s,id);
+  return g;}
+function pavingOn(a,b){const key=rk(a,b),on=(id,p)=>p&&p.k==='road'&&rk(id,p.to)===key; // the city paving the road a–b, or with it queued
+  for(const id of [a,b]){const s=G.s[id];if(on(id,s.build)||s.queue.some(q=>on(id,q)))return s;}return null;}
 const MAX_UNITS=12;
 const TAX=['Low','Normal','High','Very High'];
 const TAX_MUL=[0.75,1,1.25,1.5], TAX_ORDER=[10,0,-12,-25], TAX_GROW=[0.4,0,-0.4,-0.9];
@@ -869,13 +930,13 @@ function mkUnit(type,moved){return{uid:G.seq++,type,men:UNITS[type].men,xp:0,mov
 function mkPass(p){ // a pass is kept like a city so that armies, battles and saves treat it the same; owner is null while nobody holds it
   return{id:p.id,pass:true,owner:p.owner,pop:0,tax:1,bld:{farms:0,market:0,temple:0,barracks:0,stables:0,walls:p.fort},build:null,units:p.garrison.map(t=>mkUnit(t,false)),unrest:0,rec:0};
 }
-function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);for(const p of PNODES)if(!G.s[p.id])G.s[p.id]=mkPass(p);for(const n of NODES)G.s[n.id].queue=G.s[n.id].queue||[];G.orders=G.orders||[];} // saves from before faction choice were always Rome, and from before passes, building queues or march orders had none
+function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);for(const p of PNODES)if(!G.s[p.id])G.s[p.id]=mkPass(p);for(const n of NODES){const s=G.s[n.id];s.queue=s.queue||[];if(s.god===undefined)s.god=s.bld.temple?TEMPLE_GOD[n.id]||'jove':null;s.wonder=s.wonder||null;}G.orders=G.orders||[];G.roads=G.roads||{};} // saves from before faction choice were always Rome, and from before passes, building queues, march orders, temple gods, wonders or roads had none
 function newGame(fid){
   setPlayer(fid);
-  G={v:1,player:PLAYER,turn:1,seq:1,gold:{},cap:{},s:{},reports:[],last:[],orders:[],won:false,lost:false};
+  G={v:1,player:PLAYER,turn:1,seq:1,gold:{},cap:{},s:{},reports:[],last:[],orders:[],roads:{},won:false,lost:false};
   for(const f in FACTIONS){G.gold[f]=f===PLAYER||f==='carthage'?1600:1200;G.cap[f]=FACTIONS[f].capital;}
   for(const [id,,, ,owner,pop,bld,units] of SDEF){
-    G.s[id]={id,owner,pop,tax:1,bld:Object.assign({farms:0,market:0,temple:0,barracks:0,stables:0,walls:0},bld),build:null,queue:[],units:[],unrest:0,rec:0};
+    G.s[id]={id,owner,pop,tax:1,bld:Object.assign({farms:0,market:0,temple:0,barracks:0,stables:0,walls:0},bld),build:null,queue:[],units:[],unrest:0,rec:0,god:bld.temple?TEMPLE_GOD[id]||'jove':null,wonder:null};
     G.s[id].units=units.map(t=>mkUnit(t,false));
   }
   for(const p of PNODES)G.s[p.id]=mkPass(p);
@@ -904,26 +965,38 @@ function loadSave(){try{const t=localStorage.getItem(SAVE_KEY);if(t){const g=JSO
 /* ================= ECONOMY ================= */
 const ownedBy=f=>NODES.map(n=>G.s[n.id]).filter(s=>s.owner===f);
 const sname=s=>NODE[s.id].name;
-const tier=s=>s.pop<2000?1:s.pop<6000?2:3;
-const tierName=s=>s.pop>=12000?'Great City':['','Village','Town','City'][tier(s)];
+const TIER_POP=[2000,4500],GREAT=9000; // people needed for a Town (level-2 buildings), a City (level 3) and a Great City
+const tier=s=>s.pop<TIER_POP[0]?1:s.pop<TIER_POP[1]?2:3;
+const tierName=s=>s.pop>=GREAT?'Great City':['','Village','Town','City'][tier(s)];
 function capDist(s){const c=G.cap[s.owner];if(!c||G.s[c].owner!==s.owner)return 3;return DIST[c][s.id]??3;}
+const templeName=s=>s.bld.temple?lvName(s,'temple',s.bld.temple-1):'Temple';
 function orderParts(s){
-  return[['Base',70],['Temple',s.bld.temple*12],['Garrison',Math.min(s.units.length,4)*4],['Taxes',TAX_ORDER[s.tax]],
+  return[['Base',70],[templeName(s),s.bld.temple*(TEMPLE_ORDER+(s.god==='jove'?6:0))],['Salt',hasRes(s,'salt')?8:0],['Great Circus',hasWonder(s.owner,'circus')?6:0],['Garrison',Math.min(s.units.length,4)*4],['Taxes',TAX_ORDER[s.tax]],
     ['City size',-Math.round(s.pop/800)],['Recent conquest',-Math.round(s.unrest)],['Distance from capital',-capDist(s)*3]];
 }
 const order=s=>clamp(orderParts(s).reduce((a,p)=>a+p[1],0),0,120);
 function incomeParts(s){
-  const base=40,tax=s.pop*0.055*TAX_MUL[s.tax],mkt=tax*0.2*s.bld.market;
-  const o=order(s);const pen=o<40?-(base+tax+mkt)*(1-Math.max(0.3,o/40)):0;
-  return{base,tax,mkt,pen,total:Math.round(base+tax+mkt+pen)};
+  const base=40,tax=s.pop*0.055*TAX_MUL[s.tax],mkt=tax*0.2*s.bld.market,god=s.god==='merc'?tax*.15*s.bld.temple:0,res=resOf(s).gold||0,road=roadTrade(s);
+  let sub=base+tax+mkt+god+res+road;const won=hasWonder(s.owner,'harbour')?sub*.1:0;sub+=won;
+  const o=order(s);const pen=o<40?-sub*(1-Math.max(0.3,o/40)):0;
+  return{base,tax,mkt,god,res,road,won,pen,total:Math.round(sub+pen)};
 }
 const income=s=>incomeParts(s).total;
-function growth(s){let g=0.8+s.bld.farms*0.6+TAX_GROW[s.tax];if(order(s)<40)g=Math.min(g,0);return g;}
+const growthParts=s=>[['Base',0.8],['Farms',s.bld.farms*0.6],['Taxes',TAX_GROW[s.tax]],['Room to grow (village)',tier(s)===1?0.5:0],['Grain',hasRes(s,'grain')?0.5:0],
+  [templeName(s),s.god==='ceres'?s.bld.temple*0.4:0],['Great Aqueduct',hasWonder(s.owner,'aqueduct')?0.4:0]];
+function growth(s){let g=growthParts(s).reduce((a,p)=>a+p[1],0);if(order(s)<40)g=Math.min(g,0);return g;}
+function nextTierTxt(s){ // when the city reaches the next size, at today's growth
+  const t=tier(s);if(t>=3)return'';const at=TIER_POP[t-1],g=growth(s);
+  const n=g>0?Math.ceil(Math.log(at/s.pop)/Math.log(1+g/100)):0;
+  return` It becomes a ${t===1?'Town':'City'} at ${fmt(at)} people${n?` — about ${turnsTxt(n)} at ${g>=0?'+':''}${g.toFixed(1)}% a turn`:' — but it is not growing now'}.`;}
 const upkeepOf=units=>units.reduce((a,u)=>a+UNITS[u.type].upk,0);
 const upkeep=f=>ownedBy(f).reduce((a,s)=>a+upkeepOf(s.units),0)+heldPasses(f).reduce((a,s)=>a+upkeepOf(s.units),0);
 const grossIncome=f=>ownedBy(f).reduce((a,s)=>a+income(s),0);
 const netIncome=f=>grossIncome(f)-upkeep(f);
 const canRecruit=(s,t)=>{const r=UNITS[t].req;return !r||s.bld[r.b]>=r.lv;};
+const recruitXp=s=>Math.min(3,(hasRes(s,'iron')?1:0)+marsXp(s)+(hasWonder(s.owner,'gymnasium')?1:0)); // experience a new unit from s starts with
+const unitCost=(s,t)=>UNITS[t].kind==='cav'&&hasRes(s,'horses')?Math.round(UNITS[t].cost*.75/10)*10:UNITS[t].cost;
+function trainUnit(s,t){const u=mkUnit(t,true);u.xp=recruitXp(s);return u;}
 const countGenerals=f=>[...ownedBy(f),...heldPasses(f)].reduce((a,s)=>a+s.units.filter(u=>u.type==='general').length,0);
 function unitPower(u){const T=UNITS[u.type];return u.men*T.w*(T.atk+T.def+T.ratk*0.6+(u.xp||0)*2+T.charge*0.3)*(0.6+T.mor/200)/10;}
 const armyPower=us=>us.reduce((a,u)=>a+unitPower(u),0);
@@ -1034,6 +1107,7 @@ function renderNodes(){
   tidyPasses();
   const mv=UI.move,adj=mv?new Set(moveTargets(mv.from)):null,dz=dangerScan();let routes='',h='';
   const seg=(a,b,cls)=>{const c=segCurve(a,b);routes+=`<path class="${cls}" d="M${c.x0},${c.z0} Q${c.cx},${c.cz} ${c.x1},${c.z1}"/>`;};
+  for(const k in G.roads){const[a,b]=k.split('|');seg(a,b,'road paved');} // paved roads first, under the highlights
   if(mv)for(const id of moveTargets(mv.from))seg(mv.from,id,'route-hl'+(isFoeTarget(id)?' foe':''));
   else{for(const p of orderPaths())for(let i=0;i+1<p.length;i++)seg(p[i],p[i+1],'route-plan'); // armies under march orders: the road still ahead of them
     const d=UI.sel&&dz[UI.sel];if(d)seg(d.from,UI.sel,'route-hl foe');} // where the threat to the picked city would come from
@@ -1060,6 +1134,7 @@ function renderNodes(){
     if(dz[n.id]&&!mv)h+=`<circle class="dng" r="${r+7}"/><text x="${-r-16}" y="${r+4}" font-size="12">⚠️</text>`; // a rival next door could attack it this turn
     h+=`<circle class="town" r="${r}" style="stroke:${F.color}"/><circle r="${(r*.45).toFixed(1)}" fill="${F.color}"/>`;
     if(G.cap[s.owner]===n.id)h+=`<path d="${starPath(0,-r-8,5.5)}" fill="#f2c94c" stroke="#3a2610" stroke-width="1"/>`;
+    if(s.wonder)h+=`<text x="${r+1}" y="${r+6}" font-size="12">${WONDERS[s.wonder].ico}</text>`;
     h+=`<text class="lbl" y="${r+14}">${n.name}</text>`;
     if(s.units.length){const ready=s.owner===PLAYER&&s.units.some(u=>!u.moved);
       h+=`<g class="badge${ready?' ready':''}" transform="translate(${r+7},${-r-3})"><rect x="-9" y="-8" width="18" height="16" rx="3" fill="${F.color}"/><text y="4">${s.units.length}</text></g>`;}
@@ -1165,7 +1240,7 @@ function renderSheet(){
   const s=G.s[UI.sel];if(!s)return closeSheet();
   if(s.pass)return renderPassSheet(s);
   const F=FACTIONS[s.owner],mine=s.owner===PLAYER,o=order(s);
-  let h=`<div class="sh-head"><div class="sh-flag" style="background:${F.color}"></div><div><h3>${sname(s)}</h3><div class="sh-sub">${F.name} · ${tierName(s)} of ${fmt(s.pop)}</div></div><button class="sh-x" id="shX" aria-label="Close">×</button></div>`;
+  let h=`<div class="sh-head"><div class="sh-flag" style="background:${F.color}"></div><div><h3>${sname(s)}</h3><div class="sh-sub">${F.name} · ${tierName(s)} of ${fmt(s.pop)}${resOf(s).name?` · ${resOf(s).ico} ${resOf(s).name}`:''}${s.wonder?` · ${WONDERS[s.wonder].ico} ${WONDERS[s.wonder].name}`:''}</div></div><button class="sh-x" id="shX" aria-label="Close">×</button></div>`;
   if(mine){
     const g=growth(s),d=dangerTo(s);
     h+=`<div class="chips"><span class="chip">Income <b>+${fmt(income(s))}</b></span><span class="chip ${o<40?'bad':o>=80?'good':''}">Order <b>${o}%</b></span><span class="chip">Growth <b>${g>=0?'+':''}${g.toFixed(1)}%</b></span>${s.bld.walls?`<span class="chip">${BUILD.walls.lv[s.bld.walls-1]}</span>`:''}${d?`<span class="chip bad">⚠️ Threatened from ${NODE[d.from].name}</span>`:''}</div>`;
@@ -1199,6 +1274,8 @@ function renderSheet(){
     const ok=await modal({title:'Disband unit?',body:`<p>${UNITS[u.type].name} will be sent home. You save ${UNITS[u.type].upk} gold upkeep per turn.</p>`,buttons:[{label:'Disband',value:1,cls:'primary'},{label:'Keep',value:0}]});
     if(ok){s.units=s.units.filter(x=>x!==u);UI.pick.delete(uid);save();render();}};
   sh.querySelectorAll('[data-build]').forEach(b=>b.onclick=()=>doBuild(s,b.dataset.build));
+  sh.querySelectorAll('[data-road]').forEach(b=>b.onclick=()=>addProject(s,{k:'road',to:b.dataset.road}));
+  sh.querySelectorAll('[data-wonder]').forEach(b=>b.onclick=()=>addProject(s,{k:'wonder',w:b.dataset.wonder}));
   sh.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>cancelBuild(s,+b.dataset.cancel));
   sh.querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>doRecruit(s,b.dataset.rec));
   sh.querySelectorAll('[data-tax]').forEach(b=>b.onclick=()=>{s.tax=+b.dataset.tax;save();render();});
@@ -1206,78 +1283,131 @@ function renderSheet(){
 }
 function tabArmy(s){
   if(!s.units.length)return dangerRow(s)+'<div class="note">No troops here. Recruit units, or march an army in from a neighbouring city.</div>';
-  return`${dangerRow(s)}${orderRows(s)}<div class="note">Tap units to select them, then march to a neighbouring city, or camp on a pass along the road. Each army marches one stop per turn — tap a city farther off and it marches on by itself, turn after turn.</div><div class="ugrid">${s.units.map(u=>unitCard(u,PLAYER,{pick:UI.pick.has(u.uid),dim:u.moved,tag:armyTag(u)})).join('')}</div>`;
+  return`${dangerRow(s)}${orderRows(s)}<div class="note">Tap units to select them, then march to a neighbouring city, or camp on a pass along the road. Each army marches one stop per turn (two when the first is along a paved road between your cities) — tap a city farther off and it marches on by itself, turn after turn.</div><div class="ugrid">${s.units.map(u=>unitCard(u,PLAYER,{pick:UI.pick.has(u.uid),dim:u.moved,tag:armyTag(u)})).join('')}</div>`;
 }
 function dangerRow(s){const d=dangerTo(s);if(!d)return'';
   return`<div class="row chk"><div class="ico">⚠️</div><div class="main"><div class="t">In danger</div><div class="d">The ${FACTIONS[d.f].adj} army at ${NODE[d.from].name} — ${d.n} unit${d.n>1?'s':''}, ${fmt(d.men)} men — is strong enough to attack ${sname(s)} once you end the turn. Reinforce it, or expect a fight.</div></div></div>`;}
 function orderRows(s){return G.orders.map((o,i)=>{const n=o.at===s.id?s.units.filter(u=>o.uids.includes(u.uid)).length:0;if(!n)return'';const p=routeTo(o.at,o.to);
   return`<div class="row q"><div class="ico">🚩</div><div class="main"><div class="t">Marching to ${NODE[o.to].name}</div><div class="d">${n} unit${n>1?'s':''} · ${p?ordEta(p,o.to):'no safe road leads there now'}</div></div><button class="qx" data-stop="${i}" aria-label="Stop this march">✕</button></div>`;}).join('');}
-const armyTag=u=>{const o=G.orders.find(o=>o.uids.includes(u.uid));return o?'→ '+NODE[o.to].name:u.moved?'Done this turn':null;};
+const armyTag=u=>{const o=G.orders.find(o=>o.uids.includes(u.uid));return o?'→ '+NODE[o.to].name:u.moved?'Done this turn':u.hop?'🛣️ One more stop':null;};
 const turnsTxt=n=>`${n} turn${n>1?'s':''}`;
 function tabBuild(s){
-  const n=(s.build?1:0)+s.queue.length,full=n>=BUILD_MAX;
-  let h=`<div class="note">A ${tierName(s).toLowerCase()} can build up to level ${tier(s)}. Cities grow past 2,000 and 6,000 people to unlock more.</div>`;
+  const n=(s.build?1:0)+s.queue.length,full=n>=BUILD_MAX,gold=G.gold[PLAYER];
+  let h=`<div class="note">A ${tierName(s).toLowerCase()} can build up to level ${tier(s)}.${nextTierTxt(s)}${hasRes(s,'timber')?' 🌲 Timber from its forests makes building here 20% cheaper.':''}</div>`;
   if(s.build){ // the project under way, then the queue behind it, each with the turn it will be done
-    const row=(i,k,lv,d)=>`<div class="row q"><div class="ico">${BUILD[k].ico}</div><div class="main"><div class="t">${BUILD[k].lv[lv]}</div><div class="d">${d}</div></div><button class="qx" data-cancel="${i}" aria-label="Cancel ${BUILD[k].lv[lv]}">✕</button></div>`;
+    const row=(i,p,d)=>`<div class="row q"><div class="ico">${projIco(p)}</div><div class="main"><div class="t">${projName(s,p)}</div><div class="d">${d}</div></div><button class="qx" data-cancel="${i}" aria-label="Cancel ${projName(s,p)}">✕</button></div>`;
     let at=s.build.t;
-    h+=`<div class="qcap">Under construction · ${n} of ${BUILD_MAX}</div>`+row(-1,s.build.k,s.bld[s.build.k],`🔨 Building now · ${turnsTxt(at)} left`);
-    s.queue.forEach((q,i)=>{at+=BUILD[q.k].turns[q.lv];h+=row(i,q.k,q.lv,`Queued · done in ${turnsTxt(at)}`);});
-    h+=`<div class="note">Each project starts when the one before it is finished. Gold is paid when you queue; ✕ cancels for a full refund.</div><div class="qcap">Buildings</div>`;
+    h+=`<div class="qcap">Under construction · ${n} of ${BUILD_MAX}</div>`+row(-1,curProj(s),`🔨 Building now · ${turnsTxt(at)} left`);
+    s.queue.forEach((q,i)=>{at+=projTurns(s,q);h+=row(i,q,`Queued · done in ${turnsTxt(at)}`);});
+    h+=`<div class="note">Each project starts when the one before it is finished. Gold is paid when you queue; ✕ cancels for a full refund.</div>`;
   }
-  for(const k of BKEYS){const B=BUILD[k],lv=s.bld[k],pl=plannedLv(s,k),cur=lv?B.lv[lv-1]:'None';
+  h+='<div class="qcap">Buildings</div>';
+  for(const k of BKEYS){const B=BUILD[k],lv=s.bld[k],pl=plannedLv(s,k),cur=lv?lvName(s,k,lv-1):'None';
     let btn,d;
     if(lv>=3){btn='<button class="btn ghost sm" disabled>Max</button>';d='Fully built';}
     else if(pl>=3){btn='<button class="btn ghost sm" disabled>Queued</button>';d='Every level is under way';}
-    else{const cost=B.cost[pl];d=`Next: ${B.lv[pl]}${pl>lv?` after ${B.lv[pl-1]}`:''} · ${fmt(cost)} gold · ${turnsTxt(B.turns[pl])}`;
+    else{const cost=projCost(s,{k,lv:pl});d=`Next: ${lvName(s,k,pl)}${pl>lv?` after ${lvName(s,k,pl-1)}`:''} · ${fmt(cost)} gold · ${turnsTxt(B.turns[pl])}`;
       if(pl>=tier(s))d+=' · needs a larger city';else if(full)d+=' · the queue is full';
-      btn=`<button class="btn gold sm" data-build="${k}" ${pl>=tier(s)||full||G.gold[PLAYER]<cost?'disabled':''}>${s.build?'Queue':'Build'}</button>`;}
-    h+=`<div class="row"><div class="ico">${B.ico}</div><div class="main"><div class="t">${B.name}: ${cur}</div><div class="d">${d}</div><div class="d">${B.eff}</div></div>${btn}</div>`;}
+      btn=`<button class="btn gold sm" data-build="${k}" ${pl>=tier(s)||full||gold<cost?'disabled':''}>${s.build?'Queue':'Build'}</button>`;}
+    const eff=k!=='temple'?B.eff:s.god?`${GODS[s.god].ico} +${TEMPLE_ORDER} public order per level · ${GODS[s.god].gift}`:`+${TEMPLE_ORDER} public order per level, and the gift of the god you dedicate it to`;
+    h+=`<div class="row"><div class="ico">${B.ico}</div><div class="main"><div class="t">${B.name}: ${cur}</div><div class="d">${d}</div><div class="d">${eff}</div></div>${btn}</div>`;}
+  const land=ADJ[s.id].filter(id=>!SEA.has(rk(s.id,id))); // roads: a sea lane can't be paved
+  if(land.length){h+='<div class="qcap">Roads</div>';
+    for(const id of land){const o=G.s[id],N=NODE[id].name;let btn,d;
+      if(paved(s.id,id)){btn='<button class="btn ghost sm" disabled>Paved</button>';
+        d=o.owner!==PLAYER?`Of use again once ${N} is yours`:blocksFor(gateOn(s.id,id),PLAYER)?'A hostile camp on the road cuts it':`Armies march on along it · trade +${tradeOn(s,id)} gold a turn`;}
+      else{const by=pavingOn(s.id,id);
+        if(by){btn='<button class="btn ghost sm" disabled>Queued</button>';d=by===s?'Paving is lined up here':`${N} is paving it`;}
+        else{const c=projCost(s,{k:'road',to:id}),own=o.owner===PLAYER;d=`Pave it · ${fmt(c)} gold · ${turnsTxt(roadTurns(s.id,id))}`;
+          if(!own)d+=` · ${N} must be yours`;else if(full)d+=' · the queue is full';
+          btn=`<button class="btn gold sm" data-road="${id}" ${!own||full||gold<c?'disabled':''}>${s.build?'Queue':'Pave'}</button>`;}}
+      h+=`<div class="row"><div class="ico">🛣️</div><div class="main"><div class="t">Road to ${N}${paved(s.id,id)?' · paved':''}</div><div class="d">${d}</div></div>${btn}</div>`;}
+    h+=`<div class="note">On a paved road between two of your cities an army marches two stops in one turn, and both cities trade: +${ROAD_TRADE} gold a turn each, and +${GOOD_TRADE} more for each trade good (🍇 🏺 🐚) at either end.</div>`;}
+  h+='<div class="qcap">Wonder</div>';
+  if(s.wonder){const W=WONDERS[s.wonder];h+=`<div class="row"><div class="ico">${W.ico}</div><div class="main"><div class="t">${W.name}</div><div class="d">${W.eff}</div></div><button class="btn ghost sm" disabled>Built</button></div>`;}
+  else{const great=isGreat(s),mine=wonderPlanned(s);
+    h+=`<div class="note">${great?'A Great City':`A Great City (${fmt(GREAT)} people)`} can raise one wonder. Each stands only once in the world, and its gift reaches every city you hold — whoever takes the city takes the wonder.</div>`;
+    for(const w of WKEYS){const W=WONDERS[w],at=wonderSite(w);let btn,d=W.eff;
+      if(at&&at.s!==s){btn='<button class="btn ghost sm" disabled>Taken</button>';d+=` · ${at.built?'stands in':'being raised in'} ${sname(at.s)}${at.s.owner!==PLAYER?` (${FACTIONS[at.s.owner].name})`:''}`;}
+      else if(at)btn='<button class="btn ghost sm" disabled>Lined up</button>';
+      else{const c=projCost(s,{k:'wonder',w});d+=` · ${fmt(c)} gold · ${turnsTxt(WONDER_TURNS)}`;if(!great)d+=' · needs a Great City';else if(mine)d+=' · one wonder to a city';else if(full)d+=' · the queue is full';
+        btn=`<button class="btn gold sm" data-wonder="${w}" ${!great||mine||full||gold<c?'disabled':''}>${s.build?'Queue':'Build'}</button>`;}
+      h+=`<div class="row"><div class="ico">${W.ico}</div><div class="main"><div class="t">${W.name}</div><div class="d">${d}</div></div>${btn}</div>`;}}
   return h;
 }
 function tabRecruit(s){
-  const list=[...(G.cap[PLAYER]===s.id?['general']:[]),...FACTIONS[PLAYER].roster];
-  let h=`<div class="note">Up to 2 recruits per city per turn (${2-s.rec} left). New units can march next turn.</div>`;
-  for(const t of list){const T=UNITS[t],ok=canRecruit(s,t);
+  const list=[...(G.cap[PLAYER]===s.id?['general']:[]),...FACTIONS[PLAYER].roster],xp=recruitXp(s);
+  const why=[hasRes(s,'iron')&&'⛏️ iron',marsXp(s)&&`${GODS.mars.ico} ${templeName(s)}`,hasWonder(PLAYER,'gymnasium')&&`${WONDERS.gymnasium.ico} ${WONDERS.gymnasium.name}`].filter(Boolean);
+  let h=`<div class="note">Up to 2 recruits per city per turn (${2-s.rec} left). New units can march next turn.${xp?` Troops trained here start with ${xpStars(xp)} experience (${why.join(', ')}).`:''}${hasRes(s,'horses')?' 🐴 Horses bred here make cavalry 25% cheaper.':''}</div>`;
+  for(const t of list){const T=UNITS[t],ok=canRecruit(s,t),cost=unitCost(s,t);
     const req=T.req&&!ok?`Needs ${BUILD[T.req.b].lv[T.req.lv-1]}`:'';
     const stats=`ATK ${T.atk} · DEF ${T.def} · MOR ${T.mor} · ${T.men} men${T.rng?` · range ${T.rng}`:''}`;
-    const dis=!ok||s.rec>=2||s.units.length>=MAX_UNITS||G.gold[PLAYER]<T.cost||(t==='general'&&countGenerals(PLAYER)>=3);
-    h+=`<div class="row"><div class="ico">${symSvg(T.kind,FACTIONS[PLAYER].color,34)}</div><div class="main"><div class="t">${T.name}</div><div class="d">${stats}</div><div class="d">${fmt(T.cost)} gold · upkeep ${T.upk}${req?` · <span class="neg">${req}</span>`:''}${t==='general'?' · capital only, max 3':''}</div></div><button class="btn gold sm" data-rec="${t}" ${dis?'disabled':''}>Recruit</button></div>`;}
+    const dis=!ok||s.rec>=2||s.units.length>=MAX_UNITS||G.gold[PLAYER]<cost||(t==='general'&&countGenerals(PLAYER)>=3);
+    h+=`<div class="row"><div class="ico">${symSvg(T.kind,FACTIONS[PLAYER].color,34)}</div><div class="main"><div class="t">${T.name}</div><div class="d">${stats}</div><div class="d">${fmt(cost)} gold${cost<T.cost?` <s>${fmt(T.cost)}</s>`:''} · upkeep ${T.upk}${req?` · <span class="neg">${req}</span>`:''}${t==='general'?' · capital only, max 3':''}</div></div><button class="btn gold sm" data-rec="${t}" ${dis?'disabled':''}>Recruit</button></div>`;}
   return h;
 }
 function tabGovern(s){
-  const ip=incomeParts(s),up=upkeepOf(s.units);
+  const ip=incomeParts(s),up=upkeepOf(s.units),r=resOf(s),li=(k,v)=>v?`<tr><td>${k}</td><td>${fmt(v)}</td></tr>`:'';
   let h=`<div class="note">Tax rate</div><div class="seg">${TAX.map((t,i)=>`<button data-tax="${i}" class="${s.tax===i?'on':''}">${t}</button>`).join('')}</div>`;
-  h+=`<table class="ledger"><caption>City income per turn</caption><tr><td>Base</td><td>${fmt(ip.base)}</td></tr><tr><td>Taxes (${TAX[s.tax].toLowerCase()})</td><td>${fmt(ip.tax)}</td></tr>${ip.mkt?`<tr><td>Market bonus</td><td>${fmt(ip.mkt)}</td></tr>`:''}${ip.pen?`<tr><td>Unrest penalty</td><td class="neg">${fmt(ip.pen)}</td></tr>`:''}<tr><td>Upkeep of troops here</td><td class="neg">−${fmt(up)}</td></tr><tr class="tot"><td>Net from ${sname(s)}</td><td class="${ip.total-up<0?'neg':'pos'}">${fmt(ip.total-up)}</td></tr></table>`;
+  if(r.name)h+=`<div class="row"><div class="ico">${r.ico}</div><div class="main"><div class="t">Local goods: ${r.name}</div><div class="d">${r.eff}</div></div></div>`;
+  h+=`<table class="ledger"><caption>City income per turn</caption><tr><td>Base</td><td>${fmt(ip.base)}</td></tr><tr><td>Taxes (${TAX[s.tax].toLowerCase()})</td><td>${fmt(ip.tax)}</td></tr>${li('Market bonus',ip.mkt)}${li(templeName(s),ip.god)}${li(r.name,ip.res)}${li('Trade by road',ip.road)}${li('Great Harbour',ip.won)}${ip.pen?`<tr><td>Unrest penalty</td><td class="neg">${fmt(ip.pen)}</td></tr>`:''}<tr><td>Upkeep of troops here</td><td class="neg">−${fmt(up)}</td></tr><tr class="tot"><td>Net from ${sname(s)}</td><td class="${ip.total-up<0?'neg':'pos'}">${fmt(ip.total-up)}</td></tr></table>`;
   h+=`<table class="ledger"><caption>Public order (below 40% hurts income; below 20% risks revolt)</caption>${orderParts(s).filter(p=>p[1]).map(([k,v])=>`<tr><td>${k}</td><td class="${v<0?'neg':''}">${v>0?'+':''}${v}</td></tr>`).join('')}<tr class="tot"><td>Order</td><td>${order(s)}%</td></tr></table>`;
+  const g=growth(s);
+  h+=`<table class="ledger"><caption>Growth per turn${tier(s)<3?` (next size at ${fmt(TIER_POP[tier(s)-1])} people)`:''}</caption>${growthParts(s).filter(p=>p[1]).map(([k,v])=>`<tr><td>${k}</td><td class="${v<0?'neg':''}">${v>0?'+':''}${v.toFixed(1)}%</td></tr>`).join('')}${order(s)<40?'<tr><td>Unrest (order below 40%)</td><td class="neg">no growth</td></tr>':''}<tr class="tot"><td>Growth</td><td>${g>=0?'+':''}${g.toFixed(1)}%</td></tr></table>`;
   h+=`<table class="ledger"><caption>Your treasury per turn</caption><tr><td>All city income</td><td>${fmt(grossIncome(PLAYER))}</td></tr><tr><td>All army upkeep</td><td class="neg">−${fmt(upkeep(PLAYER))}</td></tr><tr class="tot"><td>Net</td><td class="${netIncome(PLAYER)<0?'neg':'pos'}">${fmt(netIncome(PLAYER))}</td></tr></table>`;
   return h;
 }
-/* Building queue: a city works on one project (build) at a time, with more lined up behind it (queue: {k, lv, c} — building, level index, gold paid). Gold is paid when a project is queued; the next one starts the turn the last is finished. */
+/* Building queue: a city works on one project at a time (build), with more lined up behind it (queue). A project is a building level {k, lv}, a paved road {k:'road', to} or a wonder {k:'wonder', w}; c is the gold paid, t the turns left on the one under way. Gold is paid when a project is queued; the next one starts the turn the last is finished. */
 const BUILD_MAX=5; // projects a city can have lined up, the one under way included
 const plannedLv=(s,k)=>s.bld[k]+(s.build&&s.build.k===k?1:0)+s.queue.filter(q=>q.k===k).length; // the level a building reaches once everything lined up is done
-function doBuild(s,k){const lv=plannedLv(s,k),c=BUILD[k].cost[lv];if(lv>=3||lv>=tier(s)||G.gold[PLAYER]<c||(s.build?1:0)+s.queue.length>=BUILD_MAX)return;
-  G.gold[PLAYER]-=c;
-  if(s.build){s.queue.push({k,lv,c});toast(`Queued: ${BUILD[k].lv[lv]} (${s.queue.length+1} of ${BUILD_MAX})`);}
-  else{s.build={k,t:BUILD[k].turns[lv]};toast(`Construction started: ${BUILD[k].lv[lv]}`);}
-  AU.ui('hammer');save();render();}
+const projCost=(s,p)=>{const c=p.k==='road'?roadCost(s.id,p.to):p.k==='wonder'?WONDER_COST:BUILD[p.k].cost[p.lv];return hasRes(s,'timber')?Math.round(c*.8/10)*10:c;};
+const projTurns=(s,p)=>p.k==='road'?roadTurns(s.id,p.to):p.k==='wonder'?WONDER_TURNS:BUILD[p.k].turns[p.lv];
+const projName=(s,p)=>p.k==='road'?`Paved road to ${NODE[p.to].name}`:p.k==='wonder'?WONDERS[p.w].name:lvName(s,p.k,p.lv);
+const projIco=p=>p.k==='road'?'🛣️':p.k==='wonder'?WONDERS[p.w].ico:BUILD[p.k].ico;
+const curProj=s=>s.build&&(BUILD[s.build.k]?{...s.build,lv:s.bld[s.build.k]}:s.build); // the project under way, with the level it is raising
+function projOk(s,p){ // can this project (just taken off the queue, or about to go on it) be built here now? Gold and room in the queue aside
+  if(p.k==='road')return G.s[p.to].owner===s.owner&&!SEA.has(rk(s.id,p.to))&&!paved(s.id,p.to)&&!pavingOn(s.id,p.to);
+  if(p.k==='wonder')return isGreat(s)&&!s.wonder&&!wonderSite(p.w);
+  return p.lv<Math.min(3,tier(s));}
+function addProject(s,p){
+  const c=projCost(s,p);if(!projOk(s,p)||(p.k==='wonder'&&wonderPlanned(s))||G.gold[PLAYER]<c||(s.build?1:0)+s.queue.length>=BUILD_MAX)return false;
+  G.gold[PLAYER]-=c;const nm=projName(s,p);
+  if(s.build){s.queue.push({...p,c});toast(`Queued: ${nm} (${s.queue.length+1} of ${BUILD_MAX})`);}
+  else{s.build={...p,t:projTurns(s,p),c};toast(`Construction started: ${nm}`);}
+  AU.ui('hammer');save();render();return true;}
+async function doBuild(s,k){
+  if(k==='temple'&&!s.god){const g=await pickGod(s);if(!g)return;s.god=g;}
+  if(!addProject(s,{k,lv:plannedLv(s,k)})&&k==='temple'&&!plannedLv(s,'temple'))s.god=null;}
+function pickGod(s){ // the first shrine is dedicated to one god; every later level honours the same one
+  return modal({title:'Dedicate the shrine',body:`<p>Every level of a temple brings +${TEMPLE_ORDER} public order. The god it honours adds a gift of its own, for good. Tap a god:</p>`+
+    GOD_KEYS.map(g=>`<button class="row pick" data-v="${g}"><div class="ico">${GODS[g].ico}</div><div class="main"><div class="t">${godName(g,s.owner)}</div><div class="d">${GODS[g].gift}</div></div><span class="gt" aria-hidden="true">›</span></button>`).join(''),
+    buttons:[{label:'Cancel',value:null}]});}
 function cancelBuild(s,i){ // i: -1 for the project under way, else its place in the queue; later levels of the same building go too, since they stand on it
-  const k=i<0?s.build.k:s.queue[i].k,names=[];let back=0;
-  if(i<0){back+=BUILD[k].cost[s.bld[k]];names.push(BUILD[k].lv[s.bld[k]]);}
-  s.queue=s.queue.filter((q,j)=>{if(q.k===k&&j>=i){back+=q.c;names.push(BUILD[k].lv[q.lv]);return false;}return true;});
+  const p=i<0?curProj(s):s.queue[i],bk=!!BUILD[p.k],names=[];let back=0;
+  if(i<0){back+=s.build.c??BUILD[p.k].cost[p.lv];names.push(projName(s,p));} // a project begun before costs were stored was paid at list price
+  s.queue=s.queue.filter((q,j)=>{if(j===i||(bk&&q.k===p.k&&j>i)){back+=q.c;names.push(projName(s,q));return false;}return true;});
   if(i<0)nextBuild(s);
+  if(p.k==='temple'&&!plannedLv(s,'temple'))s.god=null; // no shrine after all: the choice of god is open again
   G.gold[PLAYER]+=back;toast(`Cancelled ${names.join(' and ')} — ${fmt(back)} gold returned`);save();render();}
-function nextBuild(s){ // the next project in line starts; one the city has become too small for is paid back
+function nextBuild(s){ // the next project in line starts; one that can no longer be built here (the city shrank, the wonder went elsewhere, the road's far end was lost) is paid back
   s.build=null;
   while(s.queue.length){const q=s.queue.shift();
-    if(q.lv===s.bld[q.k]&&q.lv<tier(s)){s.build={k:q.k,t:BUILD[q.k].turns[q.lv]};return;}
-    G.gold[s.owner]+=q.c;if(s.owner===PLAYER)report('↩️',`${sname(s)} can no longer build ${BUILD[q.k].lv[q.lv]}; its ${fmt(q.c)} gold was returned.`,s.id,'build');}
+    if(projOk(s,q)&&(!BUILD[q.k]||q.lv===s.bld[q.k])){s.build={...q,t:projTurns(s,q)};return;}
+    G.gold[s.owner]+=q.c;if(s.owner===PLAYER)report('↩️',`${sname(s)} can no longer build the ${projName(s,q)}; its ${fmt(q.c)} gold was returned.`,s.id,'build');}
 }
+function finishProj(s,f){ // the project under way is done; returns the player's dispatch about it, if any
+  const p=curProj(s);
+  if(p.k==='road'){G.roads[rk(s.id,p.to)]=1;return f===PLAYER?report('🛣️',`The road from ${sname(s)} to ${NODE[p.to].name} is paved. Armies march on along it, and both cities trade.`,s.id,'build'):null;}
+  if(p.k==='wonder'){s.wonder=p.w;const W=WONDERS[p.w];
+    if(f===PLAYER)return report(W.ico,`The ${W.name} stands complete in ${sname(s)}! ${W.eff}.`,s.id,'build');
+    report(W.ico,`${theF(f,1)} completed the ${W.name} in ${sname(s)}.`,s.id);return null;} // everyone hears of a wonder
+  s.bld[p.k]++;return f===PLAYER?report('🏛️',`${projName(s,p)} completed in ${sname(s)}.`,s.id,'build'):null;}
 function dropQueue(s){ // the city changes hands: the project under way is lost, the ones not yet begun are paid back to the old owner
-  let back=0;for(const q of s.queue)back+=q.c;if(back&&G.gold[s.owner]!=null)G.gold[s.owner]+=back;s.queue=[];s.build=null;return back;}
-function doRecruit(s,t){const T=UNITS[t];
-  if(G.gold[PLAYER]<T.cost)return toast('Not enough gold');if(s.units.length>=MAX_UNITS)return toast('This city holds at most 12 units');
+  let back=0;for(const q of s.queue)back+=q.c;if(back&&G.gold[s.owner]!=null)G.gold[s.owner]+=back;s.queue=[];s.build=null;if(!s.bld.temple)s.god=null;return back;}
+function doRecruit(s,t){const T=UNITS[t],cost=unitCost(s,t);
+  if(G.gold[PLAYER]<cost)return toast('Not enough gold');if(s.units.length>=MAX_UNITS)return toast('This city holds at most 12 units');
   if(s.rec>=2)return toast('Each city can train 2 units per turn');if(t==='general'&&countGenerals(PLAYER)>=3)return toast('You can field 3 generals at most');
-  G.gold[PLAYER]-=T.cost;s.units.push(mkUnit(t,true));s.rec++;toast(`${T.name} recruited in ${sname(s)}`);AU.ui('recruit');save();render();}
+  G.gold[PLAYER]-=cost;s.units.push(trainUnit(s,t));s.rec++;toast(`${T.name} recruited in ${sname(s)}`);AU.ui('recruit');save();render();}
 
 /* ================= MOVEMENT ================= */
 function startMove(from,uids){
@@ -1306,9 +1436,15 @@ async function executeMove(toId,dest){ // dest: where a march order sends the ar
   const fromOwner=from.owner; // for undo
   if(to.owner===PLAYER){
     const n=Math.min(units.length,MAX_UNITS-to.units.length);if(n<=0)return toast(`${sname(to)} already holds 12 units`);
-    const mv=units.slice(0,n);UI.busy=true;try{await cmMarch(from.id,to.id,PLAYER,mv);}finally{UI.busy=false;}from.units=from.units.filter(u=>!mv.includes(u));mv.forEach(u=>u.moved=true);to.units.push(...mv);
-    const e={from:from.id,to:to.id,uids:mv.map(u=>u.uid),prev:dropOrders(mv),ord:null,fromOwner};UI.undo.push(e);
-    if(n<units.length)toast(`Only ${n} units fit in ${sname(to)}`);else if(dest&&dest!==to.id)e.ord=giveOrder(mv,to.id,dest);
+    const mv=units.slice(0,n),quick=quickRoad(from.id,to.id,PLAYER)&&mv.every(u=>!u.hop),hp=mv.map(u=>u.hop|0); // a paved road leaves the army one more stop this turn
+    UI.busy=true;try{await cmMarch(from.id,to.id,PLAYER,mv);}finally{UI.busy=false;}from.units=from.units.filter(u=>!mv.includes(u));mv.forEach(u=>{if(quick)u.hop=1;else u.moved=true;});to.units.push(...mv);
+    const e={from:from.id,to:to.id,uids:mv.map(u=>u.uid),hp,prev:dropOrders(mv),ord:null,fromOwner};UI.undo.push(e);
+    if(n<units.length)toast(`Only ${n} units fit in ${sname(to)}`);
+    else if(dest&&dest!==to.id){
+      const p=quick&&routeTo(to.id,dest),nx=p&&p[1];
+      if(nx&&!isFoeTarget(nx)&&!(G.s[nx].owner===PLAYER&&G.s[nx].units.length+mv.length>MAX_UNITS)){UI.move={from:to.id,uids:e.uids};return executeMove(nx,dest);} // straight on, down the paved road
+      e.ord=giveOrder(mv,to.id,dest);}
+    else if(quick)toast(`Paved road — the army can march one more stop this turn`);
     save();render();return;
   }
   UI.busy=true;
@@ -1332,7 +1468,7 @@ function undoMove(){ // take back the last march through your own land this turn
   if(us.length!==e.uids.length||to.owner!==PLAYER||(!from.pass&&from.owner!==PLAYER)){UI.undo=[];render();return toast('That march can no longer be undone');}
   if(from.units.length+us.length>MAX_UNITS){UI.undo.push(e);return toast(`${sname(from)} has no room to take them back`);}
   cancelMove();
-  to.units=to.units.filter(u=>!us.includes(u));us.forEach(u=>u.moved=false);from.units.push(...us);from.owner=e.fromOwner;
+  to.units=to.units.filter(u=>!us.includes(u));us.forEach(u=>{u.moved=false;if(e.hp)u.hop=e.hp[e.uids.indexOf(u.uid)]||0;});from.units.push(...us);from.owner=e.fromOwner;
   if(e.pass&&!to.units.length){to.owner=e.pass.owner;to.build=e.pass.build;}
   G.orders=G.orders.filter(o=>o!==e.ord); // the order this march gave goes; any it replaced comes back
   for(const p of e.prev){const o=G.orders.find(o=>o.at===p.at&&o.to===p.to);if(o)o.uids.push(...p.uids);else G.orders.push(p);}
@@ -1354,7 +1490,8 @@ function routeTo(from,dest){ // the shortest road from `from` to `dest` through 
       if(G.s[m].owner===PLAYER)q.push(m);}}
   return null;
 }
-const ordEta=(p,to)=>{const foe=isFoeTarget(to),n=p.length-1-(foe?1:0);return foe?(n>0?`next to it in ${turnsTxt(n)}`:'next to it'):n>0?`arrives in ${turnsTxt(n)}`:'arriving';}; // an enemy goal: the army halts next door, and the attack is the player's
+function routeTurns(p,end){let i=0,n=0;while(i<end){n++;i+=i+1<end&&quickRoad(p[i],p[i+1],PLAYER)?2:1;}return n;} // turns to walk p up to stop `end`: a paved first stop lets an army take a second one the same turn
+const ordEta=(p,to)=>{const foe=isFoeTarget(to),n=routeTurns(p,p.length-1-(foe?1:0));return foe?(n>0?`next to it in ${turnsTxt(n)}`:'next to it'):n>0?`arrives in ${turnsTxt(n)}`:'arriving';}; // an enemy goal: the army halts next door, and the attack is the player's
 const orderPaths=()=>(G.orders||[]).map(o=>routeTo(o.at,o.to)).filter(p=>p&&p.length>1);
 function dropOrders(us){ // a fresh move replaces any standing order; returns what was taken out, for undo
   const ids=new Set(us.map(u=>u.uid)),out=[];
@@ -1362,25 +1499,30 @@ function dropOrders(us){ // a fresh move replaces any standing order; returns wh
   G.orders=G.orders.filter(o=>o.uids.length);return out;}
 function giveOrder(us,at,dest){
   const p=routeTo(at,dest),foe=isFoeTarget(dest),N=NODE[dest].name;if(!p)return null;
-  if(p.length<=(foe?2:1)){toast(foe?`Your army stands before ${N} — order the attack next turn`:`Your army has reached ${N}`);return null;}
+  if(p.length<=(foe?2:1)){toast(foe?`Your army stands before ${N} — ${us.some(u=>!u.moved)?'it can still attack this turn':'order the attack next turn'}`:`Your army has reached ${N}`);return null;}
   const o={uids:us.map(u=>u.uid),at,to:dest};G.orders.push(o);toast(`On the march to ${N} — ${ordEta(p,dest)}`);return o;
 }
 function stopOrder(i){const o=G.orders[i];if(!o)return;G.orders.splice(i,1);toast(`March to ${NODE[o.to].name} called off — the army stays here`);save();render();}
-async function runOrders(){ // at the start of each turn, armies under orders march their next stop
+async function runOrders(){ // at the start of each turn, armies under orders march their next stop — two, when the first is along a paved road
   const keep=[];
   for(const o of G.orders){
-    const at=G.s[o.at],us=at.units.filter(u=>o.uids.includes(u.uid)&&!u.moved),D=NODE[o.to].name;
-    if(!us.length||at.owner!==PLAYER)continue; // the army is gone, or was sent elsewhere by hand
-    o.uids=us.map(u=>u.uid);
-    const p=routeTo(o.at,o.to);
-    if(!p){report('🚫',`The army marching from ${sname(at)} to ${D} has halted: no road through your own land leads there now.`,o.at);continue;}
-    const nx=p[1],to=G.s[nx];
-    if(isFoeTarget(nx)){report('⚑',`Your army has reached ${sname(at)} and stands before ${D}. The attack is yours to order.`,o.at);continue;}
-    if(to.owner===PLAYER&&to.units.length+us.length>MAX_UNITS){report('⏸️',`The army bound for ${D} waits in ${sname(at)}: ${sname(to)} has no room for it.`,o.at);keep.push(o);continue;}
-    await cmMarch(o.at,nx,PLAYER,us,true);
-    at.units=at.units.filter(u=>!us.includes(u));us.forEach(u=>u.moved=true);
-    if(to.owner===PLAYER)to.units.push(...us);else takePass(to,PLAYER,us,at); // an empty pass: they make camp
-    if(nx===o.to)report('🏁',`Your army has arrived at ${D}.`,nx);else{o.at=nx;keep.push(o);}
+    const D=NODE[o.to].name;let go=true;
+    for(let step=0;go&&step<2;step++){
+      const at=G.s[o.at],us=at.units.filter(u=>o.uids.includes(u.uid)&&!u.moved);
+      if(!us.length||at.owner!==PLAYER){go=false;break;} // the army is gone, or was sent elsewhere by hand
+      o.uids=us.map(u=>u.uid);
+      const p=routeTo(o.at,o.to);
+      if(!p){report('🚫',`The army marching from ${sname(at)} to ${D} has halted: no road through your own land leads there now.`,o.at);go=false;break;}
+      const nx=p[1],to=G.s[nx];
+      if(isFoeTarget(nx)){report('⚑',`Your army has reached ${sname(at)} and stands before ${D}. The attack is yours to order.`,o.at);go=false;break;}
+      if(to.owner===PLAYER&&to.units.length+us.length>MAX_UNITS){report('⏸️',`The army bound for ${D} waits in ${sname(at)}: ${sname(to)} has no room for it.`,o.at);keep.push(o);go=false;break;}
+      const quick=quickRoad(o.at,nx,PLAYER)&&us.every(u=>!u.hop);
+      await cmMarch(o.at,nx,PLAYER,us,true);
+      at.units=at.units.filter(u=>!us.includes(u));us.forEach(u=>{if(quick)u.hop=1;else u.moved=true;});
+      if(to.owner===PLAYER)to.units.push(...us);else takePass(to,PLAYER,us,at); // an empty pass: they make camp
+      if(nx===o.to){report('🏁',`Your army has arrived at ${D}.`,nx);go=false;break;}
+      o.at=nx;if(!quick){keep.push(o);go=false;}}
+    if(go)keep.push(o);
   }
   G.orders=keep;
 }
@@ -1483,12 +1625,12 @@ async function capture(to,fid,units,from){
   repaintTerritory();renderNodes();
   if(fid===PLAYER){
     const loot=Math.round(to.pop*.12),occ=Math.round(to.pop*.03);
-    const ch=await modal({title:`${sname(to)} is ours`,body:`<p>Your troops hold ${sname(to)}. How should they treat the city?</p>`,
+    const W=to.wonder&&WONDERS[to.wonder],ch=await modal({title:`${sname(to)} is ours`,body:`<p>Your troops hold ${sname(to)}. How should they treat the city?</p>${W?`<p>${W.ico} <b>The ${W.name} is yours now.</b> ${W.eff}.</p>`:''}`,
       buttons:[{label:`Occupy · +${fmt(occ)} gold, people stay calm`,value:'occ',cls:'gold'},{label:`Sack · +${fmt(loot)} gold, lose ¼ of the people`,value:'sack',cls:'ghost'}]});
     if(ch==='sack'){G.gold[PLAYER]+=loot;to.pop=Math.round(to.pop*.75);to.unrest=45;}else G.gold[PLAYER]+=occ;
   }else{
     G.gold[fid]+=Math.round(to.pop*.04);
-    if(prev===PLAYER)report('🔥',`${theF(fid,1)} captured ${sname(to)}!${back?` The ${fmt(back)} gold set aside for its building queue was returned.`:''}`,to.id);
+    if(prev===PLAYER)report('🔥',`${theF(fid,1)} captured ${sname(to)}!${to.wonder?` The ${WONDERS[to.wonder].name} is theirs now.`:''}${back?` The ${fmt(back)} gold set aside for its building queue was returned.`:''}`,to.id);
     else report('⚑',`${theF(fid,1)} took ${sname(to)} from ${prev==='rebels'?'its free people':theF(prev)}.`,to.id);
   }
   if(prev!=='rebels'&&prev!==PLAYER&&!ownedBy(prev).length){const sg=FACTIONS[prev].sg;
@@ -2996,12 +3138,13 @@ function cmTerrain(scene){
   for(const n of PNODES)n.gh=Math.max(1.1,cmBase(n.x,n.z));
   for(const n of NODES){ // the spot beside each city where its army stands: toward the nearest neighbour, swung aside
     let best=null,bd=1e9;for(const id of ADJ[n.id]){const m=NODE[id],d=Math.hypot(m.x-n.x,m.z-n.z);if(d<bd){bd=d;best=m;}}
-    const a=Math.atan2(best.z-n.z,best.x-n.x)+.6;n.ux=Math.cos(a);n.uz=Math.sin(a);}
+    const a=Math.atan2(best.z-n.z,best.x-n.x)+.6;n.ux=Math.cos(a);n.uz=Math.sin(a);
+    n.wa=cmWonderDir(n);const wx=n.x+Math.cos(n.wa)*24,wz=n.z+Math.sin(n.wa)*24;n.wp=cmBase(wx,wz)>.5?[wx,wz]:null;} // where a wonder would stand: the ground there is levelled too
   for(let j=0;j<CGZ;j++)for(let i=0;i<CGX;i++){
     const x=i*CMS,z=j*CMS;let h=cmBase(x,z);
     for(const n of NODES){const dx=x-n.x,dz=z-n.z;if(Math.abs(dx)>64||Math.abs(dz)>64)continue;
       const dd=Math.hypot(dx,dz),t=clamp((dx*n.ux+dz*n.uz)/48,0,1)*48,ds=Math.hypot(dx-n.ux*t,dz-n.uz*t);
-      const w=Math.max(sstep(20,9,dd),sstep(18,10,ds));if(w>0)h=lerp(h,n.gh,w);}
+      const w=Math.max(sstep(20,9,dd),sstep(18,10,ds),n.wp?sstep(15,8,Math.hypot(x-n.wp[0],z-n.wp[1])):0);if(w>0)h=lerp(h,n.gh,w);}
     for(const n of PNODES){const dx=x-n.x,dz=z-n.z;if(Math.abs(dx)>40||Math.abs(dz)>40)continue;
       const dd=Math.hypot(dx,dz),t=clamp((dx*n.ux+dz*n.uz)/20,0,1)*20,ds=Math.hypot(dx-n.ux*t,dz-n.uz*t);
       const w=Math.max(sstep(12,5,dd),sstep(9,4,ds));if(w>0)h=lerp(h,n.gh,w);}
@@ -3183,7 +3326,7 @@ function cmRoads(scene){
 }
 function cmTrees(scene,mask){
   const T=THREE,rr=mulberry32(77),items=[],tint=()=>new T.Color(.85+rr()*.2,.85+rr()*.2,.8+rr()*.15).getHex();
-  const near=(x,z)=>{for(const n of PNODES)if((x-n.x)**2+(z-n.z)**2<520)return true;for(const n of NODES){const dx=x-n.x,dz=z-n.z;if(dx*dx+dz*dz<700)return true;const t=clamp((dx*n.ux+dz*n.uz)/48,0,1)*48;if(Math.hypot(dx-n.ux*t,dz-n.uz*t)<14)return true;}return false;};
+  const near=(x,z)=>{for(const n of PNODES)if((x-n.x)**2+(z-n.z)**2<520)return true;for(const n of NODES){const dx=x-n.x,dz=z-n.z;if(dx*dx+dz*dz<700||(n.wp&&(x-n.wp[0])**2+(z-n.wp[1])**2<200))return true;const t=clamp((dx*n.ux+dz*n.uz)/48,0,1)*48;if(Math.hypot(dx-n.ux*t,dz-n.uz*t)<14)return true;}return false;};
   for(let gz=12;gz<MH-12;gz+=11)for(let gx=12;gx<MW-12;gx+=11){
     const x=gx+(rr()-.5)*9,z=gz+(rr()-.5)*9,h=hm(x,z);if(h<.9||h>10.5)continue;
     if(sstep(878,905,z)*(x<500?1:0)>.3)continue;
@@ -3244,12 +3387,13 @@ float fp=vF.z<1.5?step(.5,fract(vF.x)):1.-step(.3,length(fract(vF.xy)-.5)); // f
 diffuseColor.rgb*=1.-fp*vF.w*(1.-smoothstep(140.,380.,vFd));`);};
 }
 function cmFieldGeo(n,s,lv,rects){
-  const R=mulberry32(n.i*7393+11),tr=tier(s),r0=[0,5.5,8,11][tr]+(s.pop>=12000?1.5:0)+6,r1=r0+[0,14,25,36][lv],win=G.turn%2===0?1:0,cs=8.4;
+  const R=mulberry32(n.i*7393+11),tr=tier(s),r0=[0,5.5,8,11][tr]+(s.pop>=GREAT?1.5:0)+6,r1=r0+[0,14,25,36][lv],win=G.turn%2===0?1:0,cs=8.4;
   let nb=null,bd=1e9;for(const id of ADJ[n.id]){const m=NODE[id],d=Math.hypot(m.x-n.x,m.z-n.z);if(d<bd){bd=d;nb=m;}}
   const th=Math.atan2(nb.z-n.z,nb.x-n.x),ax=Math.cos(th),az=Math.sin(th); // the plots run square to the road toward the nearest neighbour, as the surveyors laid them out
   const V=[],C=[],F=[],c=new THREE.Color(),N=Math.ceil(62/cs)+1;
   const mine=(x,z)=>{const d=Math.hypot(x-n.x,z-n.z);for(const m of NODES)if(m!==n&&Math.hypot(x-m.x,z-m.z)<d)return false;return true;}; // each city farms only the land nearer to it than to any other
-  const ok=(x,z)=>{const h=hm(x,z);return h>.75&&h<11&&mine(x,z);};
+  const wo=s.wonder?n.wa:null,clear=(x,z)=>wo===null||Math.hypot(x-n.x,z-n.z)>r0+22||Math.abs(Math.atan2(Math.sin(Math.atan2(z-n.z,x-n.x)-wo),Math.cos(Math.atan2(z-n.z,x-n.x)-wo)))>.5; // a wonder outside the walls keeps its ground
+  const ok=(x,z)=>{const h=hm(x,z);return h>.75&&h<11&&mine(x,z)&&clear(x,z);};
   for(let gi=-N;gi<=N;gi++)for(let gj=-N;gj<=N;gj++){
     const lim=r1+(R()-.5)*7,split=R(),dir=R(),ks=[R(),R()],skip=[R(),R()]; // the same draws for every cell at every level, so fields stay put as more are added
     const cx=n.x+(gi*ax-gj*az)*cs,cz=n.z+(gi*az+gj*ax)*cs,d=Math.hypot(cx-n.x,cz-n.z);
@@ -3306,24 +3450,63 @@ function cmShipTick(t){
 }
 
 /* ---- cities and armies ---- */
+const CITY_LOT={market:-1,barracks:2,stables:3.1,tower:4.2}; // where the public buildings stand: angles on a ring around the temple
+function cmWonderDir(n){ // a wonder stands outside the walls, on the side clear of the roads, the army's camp, rivers and the sea
+  const dirs=[Math.atan2(n.uz,n.ux)];for(const id of ADJ[n.id]){const c=EDGE_CTRL[n.id+'|'+id];dirs.push(Math.atan2(c[1]-n.z,c[0]-n.x));}
+  const seg=[];for(const r of RIVERS){const q=r.pts.map(p=>P(p[0],p[1]));for(let i=0;i+1<q.length;i++)seg.push([q[i],q[i+1]]);}
+  const river=(x,z)=>{let m=1e9;for(const [[ax,az],[bx_,bz]] of seg){const dx=bx_-ax,dz=bz-az,t=clamp(((x-ax)*dx+(z-az)*dz)/(dx*dx+dz*dz||1),0,1);m=Math.min(m,Math.hypot(x-ax-dx*t,z-az-dz*t));}return m;};
+  let best=0,bs=-1e9;
+  for(let k=0;k<24;k++){const a=k/24*6.2832,c=Math.cos(a),s=Math.sin(a),h=cmBase(n.x+c*24,n.z+s*24),h2=cmBase(n.x+c*34,n.z+s*34);
+    let sc=Math.min(...dirs.map(d=>Math.abs(Math.atan2(Math.sin(a-d),Math.cos(a-d)))));
+    if(h<.75||h2<.75)sc-=4;sc-=Math.abs(h-n.gh)*.08;sc-=3*sstep(14,4,Math.min(river(n.x+c*22,n.z+s*22),river(n.x+c*32,n.z+s*32)));if(sc>bs){bs=sc;best=a;}}
+  return best;}
 function cmCityGeo(n,s,cap){
-  const T=THREE,F=FACTIONS[s.owner],fc=new T.Color(F.color),R=mulberry32(n.i*7919+31),tr=tier(s),big=s.pop>=12000,wl=s.bld.walls;
+  const T=THREE,F=FACTIONS[s.owner],fc=new T.Color(F.color),R=mulberry32(n.i*7919+31),tr=tier(s),big=s.pop>=GREAT,wl=s.bld.walls,B=s.bld;
   const cnt=[0,5,9,14][tr]+(big?4:0),rad=[0,5.5,8,11][tr]+(big?1.5:0),P=[];
   P.push(prt(cy(rad+4,rad+5,.5,14),0xa89a74,{y:.1}));
-  const roofC=new T.Color(0xa4553a).lerp(fc,.6).getHex(),walls=[0xe8dcc0,0xdcc69c,0xcfb68c,0xe2d3b4];
+  const roofC=new T.Color(0xa4553a).lerp(fc,.6).getHex(),walls=[0xe8dcc0,0xdcc69c,0xcfb68c,0xe2d3b4],MW=0xe6dfcc,CL=0xf0e9d6,TR=0xb0614a,WD=0x7a5a38;
+  const tl=B.temple,tR=tl?[0,1.3,2.5,3.4][tl]:tr>=2?1.9:.8,lr=Math.max(3.6,rad*.62); // the footprint in the middle; the ring the other public buildings stand on
+  const pd=tR+1.4,px=pd*.707,pz=pd*.707,lots=[[0,0,tR],[px,pz,.6]],spot={};
+  for(const k in CITY_LOT){const lv=k==='tower'?(tr===3?1:0):B[k];if(!lv)continue;const a=CITY_LOT[k];spot[k]=[Math.cos(a)*lr,Math.sin(a)*lr,k==='tower'?1.2:[0,1.6,2.2,2.8][lv]];lots.push(spot[k]);}
+  const free=(x,z)=>!lots.some(([lx,lz,lw])=>Math.hypot(x-lx,z-lz)<lw+1.2);
+  const house=(x,z,w,d,h,ry,ch,wc)=>P.push(prt(bx(w,h,d),wc,{x,y:h/2+.3,z,ry}),prt(cn(Math.max(w,d)*.78,ch,4),roofC,{x,y:h+.3+ch/2,z,ry:ry+Math.PI/4}));
+  let lost=0;
   for(let i=0;i<cnt;i++){
     const a=i*2.399+R()*.5,r=rad*(.32+.68*Math.sqrt((i+.5)/cnt))*(wl?.9:1.05);
-    const x=Math.cos(a)*r,z=Math.sin(a)*r,w=2+R()*1.3,d=2+R()*1.3,h=1.4+R()*1.3+(tr-1)*.3,ry=R()*3.14,ch=1.2+R()*.7;
-    P.push(prt(bx(w,h,d),walls[(R()*4)|0],{x,y:h/2+.3,z,ry}),prt(cn(Math.max(w,d)*.78,ch,4),roofC,{x,y:h+.3+ch/2,z,ry:ry+Math.PI/4}));
+    const x=Math.cos(a)*r,z=Math.sin(a)*r,w=2+R()*1.3,d=2+R()*1.3,h=1.4+R()*1.3+(tr-1)*.3,ry=R()*3.14,ch=1.2+R()*.7,wc=walls[(R()*4)|0];
+    if(free(x,z))house(x,z,w,d,h,ry,ch,wc);else lost++; // public buildings take the place of houses…
   }
-  let px=0,pz=0;
-  if(tr>=2){ // a temple in the middle of towns and cities
-    px=3.6;pz=3.6;
-    P.push(prt(cy(2.9,3.1,.5,8),0xe6dfcc,{y:.55}));
-    for(const [x,z] of [[-1.7,-1.7],[1.7,-1.7],[-1.7,1.7],[1.7,1.7]])P.push(prt(cy(.24,.26,1.9,6),0xf0e9d6,{x,y:1.8,z}));
-    P.push(prt(bx(4.2,.4,4.2),0xe6dfcc,{y:2.95}),prt(cn(3.2,1.3,4),0xb0614a,{y:3.8,ry:Math.PI/4}));
-    if(tr===3)P.push(prt(bx(2,7,2),0xd9cdb0,{x:-5,y:3.8,z:-4.5}),prt(cn(1.7,1.8,4),0xa4553a,{x:-5,y:8.2,z:-4.5,ry:Math.PI/4}));
-  }
+  const R2=mulberry32(n.i*131+7);
+  for(let i=0;i<40&&lost>0;i++){const a=i*2.399+R2()*.4,r=rad*(.78+.2*R2())*(wl?.9:1.05),x=Math.cos(a)*r,z=Math.sin(a)*r; // …which move out toward the walls
+    if(free(x,z)){house(x,z,1.8+R2(),1.8+R2(),1.3+R2()*1.2+(tr-1)*.3,R2()*3.14,1.1+R2()*.6,walls[(R2()*4)|0]);lots.push([x,z,.4]);lost--;}}
+  const gc=s.god?GODS[s.god].col:TR; // the god's colour runs under the temple roof
+  if(tl===1)P.push(prt(cy(1.3,1.4,.4,8),MW,{y:.45}),prt(bx(1.3,1.2,1.8),0xefe6d2,{y:1.25}),prt(bx(1.5,.2,2),gc,{y:1.95}),prt(cn(1.3,.9,4),TR,{y:2.5,ry:Math.PI/4})); // a shrine
+  else if(tl===2){P.push(prt(cy(2.4,2.5,.5,8),MW,{y:.55})); // a temple with columns
+    for(const [x,z] of [[-1.4,-1.4],[1.4,-1.4],[-1.4,1.4],[1.4,1.4]])P.push(prt(cy(.22,.24,1.9,6),CL,{x,y:1.75,z}));
+    P.push(prt(bx(3.6,.38,3.6),MW,{y:2.9}),prt(bx(3.7,.24,3.7),gc,{y:3.2}),prt(cn(2.7,1.2,4),TR,{y:3.9,ry:Math.PI/4}));}
+  else if(tl===3){P.push(prt(cy(3.3,3.5,1,10),MW,{y:.8}),prt(bx(2.2,2.4,3),0xefe6d2,{y:2.5})); // a great round temple on a high podium, gilded on top
+    for(let k=0;k<8;k++){const a=k/8*6.2832+.39;P.push(prt(cy(.24,.26,2.5,6),CL,{x:Math.cos(a)*2.7,y:2.55,z:Math.sin(a)*2.7}));}
+    P.push(prt(cy(3.1,3.1,.4,10),MW,{y:4}),prt(cy(3.15,3.15,.25,10),gc,{y:4.32}),prt(cn(3.3,1.7,10),TR,{y:5.3}),prt(new T.SphereGeometry(.38,6,4),0xf2c94c,{y:6.3}));}
+  else if(tr>=2)P.push(prt(cy(1.8,1.9,.2,10),0xd8cfb8,{y:.32}),prt(bx(.8,1.4,.8),MW,{y:1.1}),prt(bx(.45,1,.45),0xc9b98f,{y:2.3})); // a square with a statue
+  else P.push(prt(cy(.6,.7,.6,8),0x8e8878,{y:.6})); // the village well
+  const rot=(u,v,a)=>[u*Math.cos(a)+v*Math.sin(a),-u*Math.sin(a)+v*Math.cos(a)];
+  const put=sp=>(u,y,v,g,c,o={})=>{const ry=Math.atan2(sp[0],sp[1]),[a,b]=rot(u,v,ry);P.push(prt(g,c,{...o,x:sp[0]+a,y,z:sp[1]+b,ry:ry+(o.ry||0)}));}; // a building's own frame: +v points away from the middle
+  if(spot.market){const at=put(spot.market),lv=B.market,aw=[0xb0281f,0xe8c46a,0xf2ead4,0x3c6fb0],S=lv===2?3.6:3.8;
+    if(lv>=2){at(0,.32,0,bx(S,.12,S),0xd8cfb8); // a paved forum, colonnades on two sides; a great forum has a basilica on one
+      for(const sd of lv===3?[-1]:[-1,1]){for(let k=0;k<4;k++)at((k/3-.5)*(S-.6),1.05,sd*(S/2-.25),cy(.14,.16,1.5,5),CL);at(0,1.9,sd*(S/2-.25),bx(S,.22,.6),MW);at(0,2.12,sd*(S/2-.25),bx(S+.1,.2,.75),TR);}
+      if(lv===3)at(0,1.3,S/2+.35,bx(S,2,1.5),0xe8dcc0),at(0,2.45,S/2+.35,bx(S+.3,.3,1.8),TR),at(0,2.8,S/2+.35,bx(S-.6,.5,.9),0xe8dcc0);}
+    (lv===1?[[-.9,-.5],[.9,-.5],[0,.8]]:[[-.8,0],[.8,0]]).forEach(([u,v],k)=>{at(u,.75,v,bx(1,.9,.8),0x8a6a44);at(u,1.32,v,bx(1.25,.14,1.05),aw[k]);});} // stalls under awnings
+  if(spot.barracks){const at=put(spot.barracks),lv=B.barracks,S=[0,2.6,3.4,3.9][lv],post=cy(.12,.14,1.2,5);
+    for(const sd of [-1,1]){at(sd*S/2,.6,0,bx(.12,.6,S),WD);at(0,.6,sd*S/2,bx(S,.6,.12),WD);} // a fenced drill yard
+    if(lv===1)for(const u of [-.6,.6])at(u,.9,0,post,0x6b4a2b); // with training posts
+    else{at(0,1.05,S/2-.85,bx(S-.6,1.5,1.3),0xcfb68c);at(0,1.95,S/2-.85,bx(S-.4,.3,1.6),roofC);at(-.6,.75,-.6,post,0x6b4a2b);at(.6,.75,-.6,post,0x6b4a2b); // a barrack block along one side
+      if(lv===3){at(-S/2+.8,1.05,-.4,bx(1.2,1.5,S-2),0xcfb68c);at(-S/2+.8,1.95,-.4,bx(1.5,.3,S-1.8),roofC);at(S/2-.5,2.2,-S/2+.5,bx(.9,3.6,.9),0xa39b8a);}}} // and a second, with a watchtower
+  if(spot.stables){const at=put(spot.stables),lv=B.stables,S=[0,2.8,3.4,3.9][lv],hc=[0x6b4a2b,0x3a2a1c,0x9a7a52];
+    at(0,1,-S/2+.75,bx(S-.4,1.4,1.2),0x8a6a44);at(0,1.85,-S/2+.75,bx(S-.2,.3,1.5),0x6b4a2b); // the stable block faces the middle
+    for(const sd of [-1,1])at(sd*S/2,.55,.35,bx(.1,.4,S-1.3),WD);at(0,.55,S/2,bx(S,.4,.1),WD); // the paddock rails
+    for(let k=0;k<lv;k++){const u=(k-(lv-1)/2)*1.1,v=.5+(k%2)*.5;at(u,.8,v,bx(.34,.4,.9),hc[k]);at(u,1.05,v+.5,bx(.22,.32,.32),hc[k]);} // a horse for every level
+    if(lv===3){at(S/2+.2,1,-S/2+.75,bx(1,1.4,1.2),0x8a6a44);at(S/2+.2,1.85,-S/2+.75,bx(1.2,.3,1.5),0x6b4a2b);}}
+  if(spot.tower){const[x,z]=spot.tower;P.push(prt(bx(2,7,2),0xd9cdb0,{x,y:3.8,z}),prt(cn(1.7,1.8,4),0xa4553a,{x,y:8.2,z,ry:Math.PI/4}));}
   if(wl){ // ring wall with a gate and corner towers
     const N=12,wr=rad+4,wh=[0,1.5,2.4,3.2][wl],col=wl===1?0x7a5a38:wl===2?0xa39b8a:0xb8b0a0,vs=[];
     for(let k=0;k<N;k++){const a=k/N*6.2832;vs.push([Math.cos(a)*wr,Math.sin(a)*wr]);}
@@ -3332,11 +3515,44 @@ function cmCityGeo(n,s,cap){
       if(k===0)continue; // the gate
       const dx=x1-x0,dz=z1-z0;P.push(prt(bx(Math.hypot(dx,dz)+.2,wh,.8),col,{x:(x0+x1)/2,y:wh/2+.3,z:(z0+z1)/2,ry:-Math.atan2(dz,dx)}));}
   }
+  if(s.wonder){const d=rad+10;cmWonderParts(s.wonder,put([Math.cos(n.wa)*d,Math.sin(n.wa)*d]));}
   const hp=cap?14:tr===1?8:10.5; // standard
   P.push(prt(cy(.12,.15,hp,5),0x4a3322,{x:px,y:hp/2+.3,z:pz}));
   if(cap)P.push(prt(bx(4.6,2.8,.12),F.color,{x:px+2.4,y:hp-1.2,z:pz}),prt(bx(4.6,.4,.14),0xf2c94c,{x:px+2.4,y:hp-2.5,z:pz}),prt(new T.SphereGeometry(.45,6,4),0xf2c94c,{x:px,y:hp+.6,z:pz}));
   else P.push(prt(bx(3,1.7,.12),F.color,{x:px+1.6,y:hp-.9,z:pz}),prt(bx(3,.3,.14),0xf0e4c0,{x:px+1.6,y:hp-1.6,z:pz}));
   return mergeParts(P);
+}
+function cmWonderParts(w,at){ // each wonder its own landmark outside the walls, on a deep plinth so it never floats over the hills; +v points away from the city
+  const T=THREE,MW=0xe6dfcc,CL=0xf0e9d6,TR=0xb0614a,SAND=0xd9c38e,ST=0xb8b0a0,WA=0x2f6f8f,col=cy(.16,.18,1.6,5);
+  at(0,-1.3,0,cy(6.2,6.4,3,16),0xa89a74);
+  if(w==='circus'){ // a long track ringed by stands, the spine down the middle with its obelisk
+    at(0,.32,0,bx(10.4,.1,4.4),SAND);
+    for(const sd of [-1,1]){at(0,.95,sd*2.75,bx(8.6,1.3,1.1),MW);at(0,1.7,sd*3.05,bx(8.6,.3,.5),TR);}
+    for(let k=0;k<=4;k++){const a=(k/4-.5)*Math.PI;at(4.3+Math.cos(a)*2.75,.95,Math.sin(a)*2.75,bx(1.3,1.3,1.1),MW,{ry:-a});}
+    at(-5.4,1.1,0,bx(.9,1.6,4.6),CL);at(-5.4,1.95,0,bx(1.1,.2,4.8),TR); // the starting gates
+    at(.4,.55,0,bx(5.6,.4,.5),MW);at(.4,2.3,0,cy(.1,.3,3.4,4),0xd9cdb0);for(const u of [-2.4,3.2])at(u,1.1,0,cn(.3,1.2,6),0xd9cdb0);}
+  else if(w==='harbour'){ // a round basin with an island in the middle, as at Carthage
+    at(0,.35,0,cy(4.9,5,.7,18),ST);at(0,.36,0,cy(4,4,.52,18),WA);at(0,.72,4.5,bx(1.4,.06,2.2),WA);
+    at(0,.6,0,cy(1.4,1.5,.9,10),MW);for(let k=0;k<8;k++){const a=k/8*6.2832;at(Math.cos(a)*1.7,.85,Math.sin(a)*1.7,bx(.7,.6,.9),TR,{ry:-a});}
+    at(0,2,0,cy(.7,.8,2.2,8),MW);at(0,3.5,0,cn(.95,.9,8),TR);at(0,4.2,0,new T.SphereGeometry(.28,6,4),0xf2c94c);
+    for(const [u,v,r] of [[-2.6,1.2,.4],[2.4,-1.6,-.8],[1.3,2.7,1.9]]){at(u,.75,v,bx(.6,.35,1.8),0x6b4a2b,{ry:r});at(u,1.5,v,bx(.05,1.3,1),0xf2ead4,{ry:r});}}
+  else if(w==='aqueduct'){ // arches striding in from the hills to a fountain house by the walls
+    for(let k=0;k<7;k++)at(0,2.05,-3.2+k*1.45,bx(.75,3.5,.75),ST);
+    at(0,4.05,1.15,bx(1,.55,10),ST);at(0,4.4,1.15,bx(.6,.15,10),WA);at(0,2.3,6.4,bx(1.4,4.6,1.4),ST);
+    at(0,1.1,-4.9,cy(1.3,1.4,1.6,8),MW);at(0,2.3,-4.9,cn(1.5,.9,8),TR);at(0,.4,-4.9,cy(2,2,.25,12),WA);}
+  else if(w==='gymnasium'){ // a sand court ringed by colonnades, a bronze athlete on a tall column
+    at(0,.32,0,bx(6,.1,6),SAND);
+    for(let sd=0;sd<4;sd++){const a=sd*Math.PI/2,cu=Math.round(Math.sin(a)),cv=Math.round(Math.cos(a));
+      for(let k=0;k<4;k++){const t=(k/3-.5)*5.2;at(cu*2.8+cv*t,1.1,cv*2.8-cu*t,col,CL);}
+      at(cu*2.8,1.95,cv*2.8,bx(cv?6:.6,.24,cv?.6:6),MW);at(cu*3.05,2.2,cv*3.05,bx(cv?6.2:.9,.22,cv?.9:6.2),TR);}
+    at(0,2.4,0,cy(.3,.36,4,6),MW);at(0,4.95,0,bx(.45,1.1,.35),0x9a6a3a);at(0,5.65,0,new T.SphereGeometry(.22,6,4),0x9a6a3a);}
+  else if(w==='asclep'){ // the healer's sanctuary: a temple in a colonnaded court, the snake-staff column before it
+    at(0,.32,0,bx(6.4,.12,5.2),0xd8cfb8);
+    for(let k=0;k<6;k++)for(const sd of [-1,1])at((k/5-.5)*5.8,1.05,sd*2.4,col,CL);
+    for(const sd of [-1,1]){at(0,1.9,sd*2.4,bx(6.2,.22,.5),MW);at(0,2.12,sd*2.4,bx(6.3,.2,.7),TR);}
+    at(0,.65,-.4,bx(3,.6,3.2),MW);at(0,1.85,-.7,bx(2.2,1.8,2.2),0xefe6d2);for(const u of [-.9,-.3,.3,.9])at(u,1.85,.75,cy(.13,.15,1.8,5),CL);
+    at(0,2.9,-.2,bx(2.6,.3,3.2),0x7aa040);at(0,3.35,-.2,bx(2.8,.4,3.4),TR);
+    at(0,1.9,1.9,cy(.12,.14,3.2,5),0xd9cdb0);at(0,2,1.9,cy(.22,.22,1.8,6),0x4f7a3a);at(0,3.6,1.9,new T.SphereGeometry(.24,6,4),0xf2c94c);}
 }
 function cmPassGeo(n,s){ // a stopping place on the road: standing stones; tents when an army camps; a palisade or stone walls once fortified
   const fort=s.bld.walls,camp=s.units.length>0,own=camp||fort?s.owner:null,P=[prt(cy(8.5,9.5,.5,14),0xa89a74,{y:.1})];
@@ -3404,20 +3620,20 @@ function cmSync(){
   if(UI.sel!==CM.lastSel){CM.lastSel=UI.sel;if(UI.sel){const c=CM.city[UI.sel];if(c.vis&&c.by>CM.H*.42)cmCenterOn(UI.sel,true,.2);}} // keep a picked city above the sheet
   for(const n of NODES){
     const c=CM.city[n.id],s=G.s[n.id],F=FACTIONS[s.owner],cap=G.cap[s.owner]===n.id,tr=tier(s),wl=s.bld.walls;
-    const ck=[s.owner,tr,s.pop>=12000?1:0,wl,cap?1:0].join('|');
+    const B=s.bld,ck=[s.owner,tr,s.pop>=GREAT?1:0,wl,cap?1:0,B.market,B.temple,B.barracks,B.stables,s.god,s.wonder].join('|'); // the model shows its public buildings and wonder too
     if(c.ck!==ck){
       c.ck=ck;if(c.mesh){c.grp.remove(c.mesh);c.mesh.geometry.dispose();}
       c.mesh=new THREE.Mesh(cmCityGeo(n,s,cap),CM.mat);c.mesh.castShadow=true;c.grp.add(c.mesh);
-      c.r0=[0,9,12,15][tr]+(wl?3:1)+(s.pop>=12000?2:0);c.sel.scale.setScalar(c.r0);c.tgt.scale.setScalar(c.r0+3);c.dng.scale.setScalar(c.r0+6);
+      c.r0=[0,9,12,15][tr]+(wl?3:1)+(s.pop>=GREAT?2:0);c.sel.scale.setScalar(c.r0);c.tgt.scale.setScalar(c.r0+3);c.dng.scale.setScalar(c.r0+6);
     }
-    const fk=[s.bld.farms,G.turn%2,tr,s.pop>=12000?1:0].join('|');if(c.fk!==fk){c.fk=fk;cmFields(n,c,s);} // fields grow with the Farms and turn with the seasons
+    const fk=[s.bld.farms,G.turn%2,tr,s.pop>=GREAT?1:0,s.wonder?1:0].join('|');if(c.fk!==fk){c.fk=fk;cmFields(n,c,s);} // fields grow with the Farms and turn with the seasons
     const ak=s.owner+'|'+s.units.map(u=>u.type).join(',');if(c.ak!==ak)cmSetArmy(c,s.owner,s.units.map(u=>u.type),ak);
     c.fy=cmFront(n,s);
     const ready=s.owner===PLAYER&&s.units.some(u=>!u.moved),isT=!!(adj&&adj.has(n.id)),foe=isT&&s.owner!==PLAYER,dg=!!dz[n.id];
-    const lk=[s.owner,s.units.length,ready?1:0,s.build&&s.owner===PLAYER?1:0,cap?1:0,foe?1:0,dg?1:0].join('|');
+    const lk=[s.owner,s.units.length,ready?1:0,s.build&&s.owner===PLAYER?1:0,cap?1:0,foe?1:0,dg?1:0,s.wonder].join('|');
     if(c.lk!==lk){
       c.lk=lk;c.lw=0;c.lab.style.setProperty('--fc',F.color);c.lab.classList.toggle('foe',foe);c.lab.classList.toggle('danger',dg);
-      c.ls.textContent=(dg?'⚠️':'')+(cap?'★':'')+(s.build&&s.owner===PLAYER?'🔨':'');c.ls.style.display=c.ls.textContent?'':'none';
+      c.ls.textContent=(dg?'⚠️':'')+(cap?'★':'')+(s.wonder?WONDERS[s.wonder].ico:'')+(s.build&&s.owner===PLAYER?'🔨':'');c.ls.style.display=c.ls.textContent?'':'none';
       c.lb.textContent=s.units.length||'';c.lb.style.display=s.units.length?'':'none';c.lb.classList.toggle('ready',ready);
     }
     c.small=tr===1&&!cap;c.pri=(cap?3:0)+(s.owner===PLAYER?4:0)+tr+(UI.sel===n.id?30:0)+(isT?20:0)+(dg?20:0);
@@ -3444,7 +3660,18 @@ function cmSync(){
     c.tgt.visible=isT;if(isT)c.tgt.material=foe?CM.ringFoe:CM.ringGo;
     c.zone.visible=held;if(held)c.zone.material.color.set(FACTIONS[s.owner].color); // the zone of control: the road is closed to the owner's enemies
   }
-  CM.mvKey=mv?mv.from:null;cmRoutes(mv,dz);
+  CM.mvKey=mv?mv.from:null;cmRoutes(mv,dz);cmPaved();
+}
+function cmPaved(){ // paved roads: pale stone between dark kerbs; dashed while the paving is under way
+  const work=NODES.map(n=>G.s[n.id]).filter(s=>s.build&&s.build.k==='road').map(s=>rk(s.id,s.build.to)),key=Object.keys(G.roads).sort().join()+'/'+work.sort().join();
+  if(CM.pk===key)return;CM.pk=key;
+  if(CM.paved){CM.scene.remove(CM.paved);CM.paved.geometry.dispose();CM.paved=null;}
+  const P=[],C=[];
+  for(const [k,dash] of [...Object.keys(G.roads).map(k=>[k,false]),...work.filter(k=>!G.roads[k]).map(k=>[k,true])]){const[a,b]=k.split('|'),pts=cmCurve(a,b,Math.max(12,Math.ceil(roadLen(a,b)/3)));
+    cmRibbon(P,C,pts,1.95,(x,z)=>hm(x,z)+.34,0x6f6656,dash);cmRibbon(P,C,pts,1.45,(x,z)=>hm(x,z)+.38,0xd6cdb8,dash);}
+  if(!P.length)return;
+  CM.paved=cmRibbonMesh(P,C,CM.pavedMat||(CM.pavedMat=new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4})));
+  CM.paved.renderOrder=1.1;CM.paved.receiveShadow=true;CM.scene.add(CM.paved);
 }
 function cmRoutes(mv,dz){ // road highlights: where a picked army can march; otherwise the road ahead of armies under orders, and where a threat to the picked city comes from
   for(const m of CM.hl){CM.scene.remove(m);m.geometry.dispose();m.material.dispose();}CM.hl=[];
@@ -3685,27 +3912,34 @@ function aiPickUnit(s,f){
     if(sc>bs){bs=sc;best=t;}}
   return best;
 }
-function aiPickBuilding(s,hd){
-  const o=[];for(const k of BKEYS){const lv=s.bld[k];if(lv>=tier(s))continue;
+function aiProjects(s,hd,f,short){ // what the AI would like to build in s, best first: buildings, and with gold to spare a wonder or a paved road
+  const o=[];for(const k of BKEYS){const lv=s.bld[k];if(lv>=Math.min(3,tier(s)))continue;
     let w={farms:2,market:2.5,temple:1,barracks:2,stables:1,walls:1}[k];
     if(k==='walls'&&hd[s.id]===1)w+=2;if(k==='temple'&&order(s)<55)w+=3;if(k==='barracks'&&lv===0)w+=1.5;
-    o.push([k,w*(.5+Math.random())]);}
-  o.sort((a,b)=>b[1]-a[1]);return o[0]?o[0][0]:null;
+    if(k==='stables'&&hasRes(s,'horses'))w+=1;if(k==='barracks'&&hasRes(s,'iron'))w+=1;
+    o.push([{k,lv},w*(.5+Math.random())]);}
+  const free=isGreat(s)&&!s.wonder?WKEYS.filter(w=>!wonderSite(w)):[];if(free.length)o.push([{k:'wonder',w:pick(free)},9]); // a wonder comes first: the treasury is saved up for it (aiTurn)
+  if(!short){
+    for(const id of ADJ[s.id])if(G.s[id].owner===f&&projOk(s,{k:'road',to:id}))o.push([{k:'road',to:id},(1+(resOf(s).trade?.5:0)+(resOf(G.s[id]).trade?.5:0))*(.5+Math.random())]);}
+  return o.sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
 }
+const aiGod=(s,hd)=>order(s)<60?'jove':hd[s.id]===1&&Math.random()<.6?'mars':tier(s)<3?'ceres':pick(['merc','ceres','jove']); // order first; Mars on the frontier; else growth, then trade
 async function aiTurn(f){
   const F=FACTIONS[f];let hd=hostileDist(f),started=0;
   const gap=s=>aiNeed(s,f)-armyPower(s.units); // > 0: the city is too weak for its neighbours
   const short=ownedBy(f).some(s=>gap(s)>0); // while the frontier is short of men, building waits for spare gold
-  for(const s of shuffle(ownedBy(f))){if(s.build||started>=2)continue;const k=aiPickBuilding(s,hd);if(!k)continue;
-    const c=BUILD[k].cost[s.bld[k]];if(G.gold[f]-c<(short?600:250))continue;G.gold[f]-=c;s.build={k,t:BUILD[k].turns[s.bld[k]]};started++;}
+  const save=G.turn>=6&&ownedBy(f).some(s=>isGreat(s)&&!wonderPlanned(s))&&WKEYS.some(w=>!wonderSite(w))?WONDER_COST:0; // a Great City without a wonder: gold is put by for one, and only a city in danger still gets new troops
+  for(const s of shuffle(ownedBy(f))){if(s.build||started>=2)continue;
+    const p=aiProjects(s,hd,f,short).find(p=>G.gold[f]-projCost(s,p)>=(p.k==='wonder'?800:(short?600:250)+save));if(!p)continue; // the best it can afford, keeping a reserve
+    const c=projCost(s,p);G.gold[f]-=c;if(p.k==='temple'&&!s.god)s.god=aiGod(s,hd);s.build={...p,t:projTurns(s,p),c};started++;}
   for(const ps of shuffle(heldPasses(f))){ // with gold to spare, an army holding a road toward a rival fortifies it (one fort at a time)
     const lv=ps.bld.walls+1;if(ps.build||lv>2||!aiFront(PNODE[ps.id],f)||G.gold[f]-FORT_COST[lv]<(lv>1?1500:700))continue;
     G.gold[f]-=FORT_COST[lv];ps.build={lv,t:FORT_TURNS[lv],by:f};break;}
   for(const s of ownedBy(f).map(s=>[s,gap(s)]).sort((a,b)=>b[1]-a[1]).map(x=>x[0])){ // most endangered first
     const want=desired(s,f,hd);let n=0;
-    if(G.cap[f]===s.id&&countGenerals(f)<2&&G.gold[f]>1500&&s.units.length<MAX_UNITS){G.gold[f]-=UNITS.general.cost;s.units.push(mkUnit('general',true));}
+    if(G.cap[f]===s.id&&countGenerals(f)<2&&G.gold[f]>1500&&s.units.length<MAX_UNITS){G.gold[f]-=UNITS.general.cost;s.units.push(trainUnit(s,'general'));}
     while(s.units.length<MAX_UNITS&&(s.units.length<want||gap(s)>0)&&n<(G.cap[f]===s.id||gap(s)>0?2:1)){const t=aiPickUnit(s,f);if(!t)break;const T=UNITS[t];
-      if(G.gold[f]-T.cost<150||netIncome(f)-T.upk<-20)break;G.gold[f]-=T.cost;s.units.push(mkUnit(t,true));n++;}
+      const c=unitCost(s,t);if(G.gold[f]-c<150+(gap(s)>0?0:save)||netIncome(f)-T.upk<-20)break;G.gold[f]-=c;s.units.push(trainUnit(s,t));n++;}
   }
   const goal=aiGoal(f);
   for(const s of shuffle(ownedBy(f))){
@@ -3770,12 +4004,12 @@ async function aiTurn(f){
 
 /* ================= TURN PROCESSING ================= */
 function econTick(f){
-  G.gold[f]+=netIncome(f);
+  G.gold[f]+=netIncome(f);const heal=hasWonder(f,'asclep')?2:1; // the Sanctuary of Asclepius doubles how fast the wounded come back
   for(const s of ownedBy(f)){
-    if(s.build){s.build.t--;if(s.build.t<=0){const k=s.build.k;s.bld[k]++;const r=f===PLAYER?report('🏛️',`${BUILD[k].lv[s.bld[k]-1]} completed in ${sname(s)}.`,s.id,'build'):null;
+    if(s.build){s.build.t--;if(s.build.t<=0){const r=finishProj(s,f);
       nextBuild(s);if(r&&!s.build&&BKEYS.some(b=>s.bld[b]<Math.min(3,tier(s))))r.text+=' Nothing else is queued there.';}}
     s.pop=Math.round(s.pop*(1+growth(s)/100));s.unrest=Math.max(0,s.unrest-5);s.rec=0;
-    for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*.12));
+    for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*.12*heal));
     if(order(s)<20&&s.units.length<2&&G.cap[f]!==s.id&&Math.random()<.35){
       const back=dropQueue(s);s.owner='rebels';s.units=['rb_mil','rb_mil','rb_sling'].map(t=>mkUnit(t,false));s.unrest=0;s.tax=1;
       if(f===PLAYER)report('🔥',`${sname(s)} revolted and declared itself free!${back?` The ${fmt(back)} gold set aside for its building queue was returned.`:''}`,s.id);}
@@ -3784,7 +4018,7 @@ function econTick(f){
     if(s.owner!==f)continue;
     if(s.units.length){ // work stops while nobody is there to do it
       if(s.build){s.build.t--;if(s.build.t<=0){s.bld.walls=s.build.lv;if(f===PLAYER)report('🏰',`${FORT_NAME[s.build.lv]} completed at ${sname(s)}.`,s.id);s.build=null;}}
-      for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*(s.bld.walls?.1:.06)));}
+      for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*(s.bld.walls?.1:.06)*heal));}
     if(f!==PLAYER&&s.bld.walls&&s.units.length<2&&G.turn%3===0&&G.gold[f]>500){ // an empty fort is manned again too
       const t=FACTIONS[f].roster.find(t=>{const T=UNITS[t];return(!T.req||T.req.lv===0)&&(T.kind==='inf'||T.kind==='spear');});
       if(t){G.gold[f]-=Math.round(UNITS[t].cost*.5);s.units.push(mkUnit(t,true));}}
@@ -3830,7 +4064,7 @@ function turnItems(){ // [icon, title, text, places to jump to]
   if(dz.length)out.push(['⚠️','In danger','A rival next door has the men to attack right now. Reinforce, or expect a fight.',dz.map(([s,d])=>go(s,'army',`<span class="sw" style="background:${FACTIONS[d.f].color}"></span>${sname(s)}`)).join('')]);
   const rv=own.filter(revoltRisk);
   if(rv.length)out.push(['🔥','Revolt brewing','Order is under 20% and fewer than two units keep the peace, so a revolt can break out this turn. Lower taxes or march in troops.',rv.map(s=>go(s,'govern',`${sname(s)} · ${order(s)}%`)).join('')]);
-  const idle=own.filter(s=>!s.build&&BKEYS.some(k=>{const lv=s.bld[k];return lv<Math.min(3,tier(s))&&BUILD[k].cost[lv]<=gold;}));
+  const idle=own.filter(s=>!s.build&&BKEYS.some(k=>{const lv=s.bld[k];return lv<Math.min(3,tier(s))&&projCost(s,{k,lv})<=gold;}));
   if(idle.length)out.push(['🔨','Nothing being built','There is gold enough to start a building here.',idle.map(s=>go(s,'build',sname(s))).join('')]);
   const ez=easyTargets();
   if(ez.length)out.push(['⚔️','Easy pickings','Your ready troops here would attack with overwhelming odds.',ez.map(e=>go(e.s,'army',`${sname(e.s)} → ${sname(e.t)}${e.empty?' · empty':''}`)).join('')]);
@@ -3850,7 +4084,7 @@ async function endTurn(){
     econTick(PLAYER);
     for(const f of AI_ORDER){if(!ownedBy(f).length)continue;econTick(f);await sleep(120);await aiTurn(f);repaintTerritory();renderNodes();if(G.lost||!ownedBy(PLAYER).length)break;}
     rebelTick();G.turn++;
-    for(const n of ALLN)for(const u of G.s[n.id].units)u.moved=false;
+    for(const n of ALLN)for(const u of G.s[n.id].units){u.moved=false;u.hop=0;}
     if(ownedBy(PLAYER).length)await runOrders(); // armies under march orders take their next stop as the turn begins
   }finally{$('#busy').classList.add('hidden');UI.busy=false;}
   G.last=G.reports.slice();save();render();
@@ -3880,10 +4114,10 @@ async function openCities(){
   if(UI.busy||!G)return;
   const dz=dangerScan(),key=OV_KEY[ovSort],own=ownedBy(PLAYER).sort((a,b)=>{const x=key(a),y=key(b);return(typeof x==='string'?x.localeCompare(y):x-y)||sname(a).localeCompare(sname(b));});
   const th=(k,l)=>`<th data-v="sort:${k}" class="${ovSort===k?'on':''}">${l}</th>`;
-  const bcell=s=>{if(s.build)return`${BUILD[s.build.k].ico} ${s.build.t}t${s.queue.length?`<small>+${s.queue.length} queued</small>`:''}`;
+  const bcell=s=>{if(s.build)return`${projIco(s.build)} ${s.build.t}t${s.queue.length?`<small>+${s.queue.length} queued</small>`:''}`;
     return BKEYS.some(k=>s.bld[k]<Math.min(3,tier(s)))?'<span class="warn">Idle</span>':'—';};
   const row=s=>{const o=order(s),rdy=s.units.filter(u=>!u.moved).length;
-    return`<tr data-v="go:${s.id}:army"><td><span class="nm">${sname(s)}</span>${G.cap[PLAYER]===s.id?' ★':''}${dz[s.id]?' ⚠️':''}${revoltRisk(s)?' 🔥':''}<small>${tierName(s)} · ${fmt(s.pop)}</small></td>`+
+    return`<tr data-v="go:${s.id}:army"><td><span class="nm">${sname(s)}</span>${G.cap[PLAYER]===s.id?' ★':''}${s.wonder?' '+WONDERS[s.wonder].ico:''}${dz[s.id]?' ⚠️':''}${revoltRisk(s)?' 🔥':''}<small>${tierName(s)} · ${fmt(s.pop)} · ${resOf(s).ico}</small></td>`+
       `<td>+${fmt(income(s))}</td><td class="${o<40?'neg':o>=80?'pos':''}">${o}%</td><td>${s.units.length}${rdy<s.units.length?`<small>${rdy} ready</small>`:''}</td><td data-v="go:${s.id}:build">${bcell(s)}</td></tr>`;};
   const units=own.reduce((a,s)=>a+s.units.length,0),net=netIncome(PLAYER);
   let h=`<table class="ctab"><thead><tr>${th('name','City')}${th('income','Income')}${th('order','Order')}${th('army','Army')}<th>Build</th></tr></thead><tbody>${own.map(row).join('')}</tbody>`+
@@ -3899,7 +4133,9 @@ async function openCities(){
 
 /* ================= MENU / TITLE ================= */
 const help=()=>`<p>You lead ${G?theF(PLAYER):'one of six powers'} in 280 BC. <b>Win by holding 18 of the 26 cities.</b></p><ul>
-<li><b>Cities</b> earn gold from taxes. Build farms to grow, markets for income, temples for order, barracks and stables for better troops, walls for defence. A city builds one thing at a time, but you can queue up to ${BUILD_MAX} projects — gold is paid when you queue, and cancelling refunds it.</li>
+<li><b>Cities</b> earn gold from taxes. Build farms to grow, markets for income, temples for order, barracks and stables for better troops, walls for defence. Cities unlock bigger buildings as they grow past ${fmt(TIER_POP[0])} and ${fmt(TIER_POP[1])} people. A city builds one thing at a time, but you can queue up to ${BUILD_MAX} projects — gold is paid when you queue, and cancelling refunds it.</li>
+<li><b>Local goods</b>: every city has one — grain for growth, salt for order, wine, oil and purple dye for gold, iron for veteran recruits, horses for cheap cavalry, timber for cheap building. A <b>temple</b> is dedicated to one god when its first shrine goes up, and each god brings a different gift.</li>
+<li><b>Paved roads</b>: a city can pave the road to a neighbouring city of yours. On it an army marches two stops in one turn, and both cities earn trade. A <b>Great City</b> (${fmt(GREAT)} people) can raise one of five <b>wonders</b>, each unique in the world, whose gift reaches all your cities — and passes to whoever takes the city.</li>
 <li><b>Public order</b> drops with high taxes, big cities and recent conquest. Below 20% a lightly held city can revolt.</li>
 <li><b>Armies</b> live in cities. Select units in the Army tab and march one city per turn. Marching into an enemy city starts a battle. Tap a city farther off and the army marches there on its own, one stop at the start of each turn, through your own land — it halts before enemy ground, so the attack is always your call. A march through your own land can be taken back with <b>↶ Undo march</b> until the turn ends.</li>
 <li><b>Passes and forts</b> mark the roads between cities. An army can camp on one, and while it holds it the road is closed: an enemy marching that way must break it first, on an open field (or against a fort's walls). A camped army can build a timber or stone fort. Armies next to a battle march to join it as <b>relief</b>, arriving from the flank a little way into the fight.</li>
