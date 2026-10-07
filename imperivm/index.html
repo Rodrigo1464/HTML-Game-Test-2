@@ -272,6 +272,8 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .blab.mine .usym rect{stroke:#ffe9b0}
 .blab.sel .usym rect{stroke:#ffd166;stroke-width:3.5}
 .blab.rout{opacity:.8}
+.blab.hid{opacity:.55}
+.blab.hid::after{content:'🌿';position:absolute;top:-12px;right:-8px;font-size:12px}
 .blab.rout .usym{animation:pulse .7s infinite}
 .bfloat{position:absolute;transform:translate(-50%,-100%);font-family:var(--display);font-weight:900;font-size:13px;letter-spacing:.04em;white-space:nowrap;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 2px #000;animation:floatUp 1.1s ease-out forwards}
 @keyframes floatUp{to{transform:translate(-50%,-170%);opacity:0}}
@@ -293,9 +295,26 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .bcard.sel{border-color:var(--gold);box-shadow:inset 0 0 0 999px rgba(201,154,53,.14)}
 .bcard.rout{border-color:var(--bad)}
 .bcard.gone{opacity:.35}
+.bcard{position:relative}
+.bcard.tired .bn{color:var(--warn)}
+.bcard.exh .bn{color:var(--bad)}
+.bfx{position:absolute;top:1px;right:3px;font-size:11px;line-height:1}
+.b-abil{position:absolute;right:10px;bottom:60px;display:flex;flex-flow:column wrap-reverse;gap:6px;align-items:flex-end;max-height:calc(100% - 120px)}
+.b-abil button{height:40px;padding:0 12px;border-radius:12px;background:rgba(26,18,11,.86);color:var(--hud-ink);border:1px solid var(--hud-line);font-family:var(--display);font-size:12.5px;letter-spacing:.03em;box-shadow:0 4px 14px rgba(0,0,0,.3);white-space:nowrap}
+.b-abil button.on{background:#a8281d;color:#fff3dc;border-color:#d9a24a}
+.b-abil button:disabled{opacity:.45}
+.b-abil button small{opacity:.75;font-family:var(--serif);margin-left:4px}
 .b-actions{display:flex;gap:8px}
 .b-actions .btn{flex:1;min-height:46px;padding:0 6px}
 .b-tip{line-height:1.4}
+.res{width:100%;border-collapse:collapse;margin:8px 0;font-size:13.5px}
+.res th{font-weight:600;color:var(--ink-2);text-align:left;font-size:12px;padding:2px 4px}
+.res td{padding:3px 4px;border-top:1px solid rgba(0,0,0,.08);vertical-align:middle}
+.res td:nth-child(3),.res td:nth-child(4),.res th:nth-child(3),.res th:nth-child(4){text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.res tr.mvp td{background:rgba(201,154,53,.16)}
+.res tr.dead td{opacity:.55}
+.res .up{color:var(--good);font-weight:700;font-size:11px;margin-left:3px}
+.rnote{margin:6px 0;font-size:13.5px}
 .bline{display:flex;gap:10px;align-items:center}
 .bline .main{flex:1;min-width:0}
 .bline .t{font-weight:600;font-size:15.5px}
@@ -352,6 +371,7 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
       <div class="b-speed hidden" id="bSpeed"><button data-sp="0" aria-label="Pause">❚❚</button><button data-sp="1">1×</button><button data-sp="2">2×</button><button data-sp="4">4×</button></div>
       <div class="b-cam"><button id="bRotL" aria-label="Rotate left">⟲</button><button id="bRotR" aria-label="Rotate right">⟳</button><button class="snd" aria-label="Sound"></button></div>
       <button class="b-desel hidden" id="bDesel">✕ Deselect</button>
+      <div class="b-abil hidden" id="bAbil"></div>
       <div id="bLoad" class="busy hidden"><div class="spin"></div><div>Preparing the battlefield…</div></div>
     </div>
     <div class="b-panel">
@@ -930,10 +950,10 @@ function mkUnit(type,moved){return{uid:G.seq++,type,men:UNITS[type].men,xp:0,mov
 function mkPass(p){ // a pass is kept like a city so that armies, battles and saves treat it the same; owner is null while nobody holds it
   return{id:p.id,pass:true,owner:p.owner,pop:0,tax:1,bld:{farms:0,market:0,temple:0,barracks:0,stables:0,walls:p.fort},build:null,units:p.garrison.map(t=>mkUnit(t,false)),unrest:0,rec:0};
 }
-function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);for(const p of PNODES)if(!G.s[p.id])G.s[p.id]=mkPass(p);for(const n of NODES){const s=G.s[n.id];s.queue=s.queue||[];if(s.god===undefined)s.god=s.bld.temple?TEMPLE_GOD[n.id]||'jove':null;s.wonder=s.wonder||null;}G.orders=G.orders||[];G.roads=G.roads||{};} // saves from before faction choice were always Rome, and from before passes, building queues, march orders, temple gods, wonders or roads had none
+function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);for(const p of PNODES)if(!G.s[p.id])G.s[p.id]=mkPass(p);for(const n of NODES){const s=G.s[n.id];s.queue=s.queue||[];if(s.god===undefined)s.god=s.bld.temple?TEMPLE_GOD[n.id]||'jove':null;s.wonder=s.wonder||null;}G.orders=G.orders||[];G.roads=G.roads||{};G.sieges=G.sieges||[];} // saves from before faction choice were always Rome, and from before passes, building queues, march orders, temple gods, wonders or roads had none
 function newGame(fid){
   setPlayer(fid);
-  G={v:1,player:PLAYER,turn:1,seq:1,gold:{},cap:{},s:{},reports:[],last:[],orders:[],roads:{},won:false,lost:false};
+  G={v:1,player:PLAYER,turn:1,seq:1,gold:{},cap:{},s:{},reports:[],last:[],orders:[],roads:{},sieges:[],won:false,lost:false};
   for(const f in FACTIONS){G.gold[f]=f===PLAYER||f==='carthage'?1600:1200;G.cap[f]=FACTIONS[f].capital;}
   for(const [id,,, ,owner,pop,bld,units] of SDEF){
     G.s[id]={id,owner,pop,tax:1,bld:Object.assign({farms:0,market:0,temple:0,barracks:0,stables:0,walls:0},bld),build:null,queue:[],units:[],unrest:0,rec:0,god:bld.temple?TEMPLE_GOD[id]||'jove':null,wonder:null};
@@ -943,7 +963,15 @@ function newGame(fid){
 }
 const passStates=()=>PNODES.map(p=>G.s[p.id]);
 const heldPasses=f=>passStates().filter(s=>s.owner===f&&s.units.length);
+/* ambush: an army camped on a mountain pass or a forest road can lie hidden. Its enemies don't see it on the map, and an army that marches down that road walks into it */
+const canAmb=s=>!!s&&s.pass&&(NODE[s.id].land==='pass'||NODE[s.id].land==='forest')&&!s.bld.walls;
+const hidAmb=s=>!!s&&s.pass&&!!s.amb&&s.units.length>0&&s.owner!==PLAYER; // an enemy ambush the player can't see
+const ambFor=(g,f)=>!!g&&g.pass&&!!g.amb&&g.units.length>0&&g.owner===PLAYER&&f!==PLAYER; // the player's ambush, unseen by f
+const seenBlock=g=>blocksFor(g,PLAYER)&&!hidAmb(g); // a hostile camp the player knows about
+const aiBlock=(g,f)=>blocksFor(g,f)&&!ambFor(g,f); // ...and one the AI knows about
+const seen=s=>hidAmb(s)?{...s,owner:null,units:[]}:s; // what the player sees of a place
 function tidyPasses(){for(const s of passStates()){
+  if(!s.units.length||s.bld.walls)s.amb=null;
   if(s.owner&&s.owner!==PLAYER&&!ownedBy(s.owner).length){s.units=[];s.owner=null;s.build=null;} // a people with no city left (a revolt can end them too) has no armies in the field
   if(!s.units.length&&!s.bld.walls)s.owner=null;}} // nobody holds a bare pass once its army has left; an unfinished fort waits for its builders (build.by)
 const myBuild=s=>!!(s.build&&(s.build.by||s.owner)===PLAYER);
@@ -958,7 +986,30 @@ function segCurve(f,t){ // the quadratic curve an army walks from node f to node
   const P0=q(lo),P1=q(hi),k=hi-lo,cx=P0[0]+k*((1-lo)*(c[0]-A.x)+lo*(B.x-c[0])),cz=P0[1]+k*((1-lo)*(c[1]-A.y)+lo*(B.y-c[1]));
   return(f===city)===(city===p.a)?{x0:P0[0],z0:P0[1],x1:P1[0],z1:P1[1],cx,cz}:{x0:P1[0],z0:P1[1],x1:P0[0],z1:P0[1],cx,cz};
 }
-const isFoeTarget=id=>{const s=G.s[id];return s.pass?s.units.length>0&&s.owner!==PLAYER:s.owner!==PLAYER;};
+const isFoeTarget=id=>{const s=G.s[id];return s.pass?s.units.length>0&&s.owner!==PLAYER&&!hidAmb(s):s.owner!==PLAYER;};
+/* sieges: an army camped before a walled city ({to, from, fid, uids, t} in G.sieges; the player or the AI). From the first turn it has rams and ladders; from the second the garrison starves; the city pays no taxes and raises no troops */
+const qf=q=>q.fid||PLAYER; // sieges from before the AI laid them were all the player's
+const siegeOf=(id,fid)=>(G.sieges||[]).find(q=>q.to===id&&(!fid||qf(q)===fid));
+const besieged=s=>!!(G&&!s.pass&&(G.sieges||[]).some(q=>q.to===s.id&&qf(q)!==s.owner));
+const siegeUnits=(q,s)=>s.units.filter(u=>q.uids.includes(u.uid)); // the besiegers, in their camp s
+const AI_SIEGE_MAX=7; // turns an AI siege lasts before it gives up
+function siegeKit(q){const t=q?q.t:0;return t>=1?{rams:Math.min(3,1+Math.ceil(t/2)),ladders:Math.min(6,2*t),ramK:1}:{rams:1,ladders:0,ramK:.6};} // a direct assault has only a felled trunk for a ram
+function tidySieges(){ // a siege ends when the city is taken, the camp is lost, or its army marches off
+  G.sieges=(G.sieges||[]).filter(q=>{const t=G.s[q.to],fr=G.s[q.from],fid=qf(q);if(!t||!fr||t.owner===fid||fr.owner!==fid)return false;
+    q.uids=q.uids.filter(id=>fr.units.some(u=>u.uid===id));return q.uids.length>0;});}
+function siegeTick(){ // at the turn's end: the siege works go on, and from the second turn the garrison goes hungry
+  tidySieges();
+  for(const q of G.sieges.slice()){q.t++;const t=G.s[q.to],k=siegeKit(q),fid=qf(q),A=FACTIONS[fid].adj;
+    if(fid!==PLAYER&&q.t>AI_SIEGE_MAX){G.sieges.splice(G.sieges.indexOf(q),1);if(t.owner===PLAYER)report('🏳️',`The ${A} army has given up the siege of ${sname(t)}.`,t.id);continue;} // the AI gives up a siege that is going nowhere
+    if(q.t>=2){for(const u of t.units)u.men=Math.max(0,Math.floor(u.men*.88));t.units=t.units.filter(u=>u.men>=UNITS[u.type].men*.12);t.unrest+=6;}
+    if(t.owner===PLAYER){report('⛺',q.t===1?`${sname(t)} is besieged by the ${A} army at ${sname(G.s[q.from])}! Their rams and ladders are ready; the city pays no taxes and raises no troops.`:t.units.length?`${sname(t)} has been besieged for ${q.t} turns. The garrison is starving (${fmt(sumMen(t.units))} men left). Break the siege, or expect an assault.`:`The garrison of ${sname(t)} has starved. The city lies open to the ${A} army.`,t.id);continue;}
+    if(fid!==PLAYER)continue;
+    report('⛺',q.t===1?`The siege works before ${sname(t)} are done: ${k.rams} rams and ${k.ladders} ladders stand ready for the assault.`:t.units.length?`${sname(t)} has been besieged for ${q.t} turns. Its garrison is starving (${fmt(sumMen(t.units))} men left). Rams ${k.rams}, ladders ${k.ladders}.`:`The garrison of ${sname(t)} has starved. The city lies open.`,q.from);}
+}
+function siegeRow(s){ // on the player's own city, when an enemy besieges it
+  const q=(G.sieges||[]).find(q=>q.to===s.id&&qf(q)!==PLAYER);if(!q)return'';const k=siegeKit(q),A=FACTIONS[qf(q)].adj;
+  return`<div class="row chk"><div class="ico">⛺</div><div class="main"><div class="t">Besieged by the ${A} army${q.t?` · turn ${q.t}`:''}</div><div class="d">They are camped at ${NODE[q.from].name}${q.t?` with ${k.rams} rams and ${k.ladders} ladders`:''}. The city pays no taxes and raises no troops${q.t>=2?', and the garrison is starving':'; from the second turn the garrison starves'}. Attack ${NODE[q.from].name} to break the siege.</div></div></div>`;}
+const siegeNote=(q,from)=>{if(!q)return'';const k=siegeKit(q.from===from?q:null);return q.from!==from?'':q.t?`⛺ Siege, turn ${q.t}: ${k.rams} rams and ${k.ladders} ladders are ready, and the walls count for half.`:'⛺ The siege works are not finished: wait a turn for rams and ladders.';};
 function save(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(G));}catch(e){}}
 function loadSave(){try{const t=localStorage.getItem(SAVE_KEY);if(t){const g=JSON.parse(t);if(g&&g.v===1&&g.s)return g;}}catch(e){}return null;}
 
@@ -979,7 +1030,7 @@ function incomeParts(s){
   const base=40,tax=s.pop*0.055*TAX_MUL[s.tax],mkt=tax*0.2*s.bld.market,god=s.god==='merc'?tax*.15*s.bld.temple:0,res=resOf(s).gold||0,road=roadTrade(s);
   let sub=base+tax+mkt+god+res+road;const won=hasWonder(s.owner,'harbour')?sub*.1:0;sub+=won;
   const o=order(s);const pen=o<40?-sub*(1-Math.max(0.3,o/40)):0;
-  return{base,tax,mkt,god,res,road,won,pen,total:Math.round(sub+pen)};
+  return{base,tax,mkt,god,res,road,won,pen,total:besieged(s)?0:Math.round(sub+pen)};
 }
 const income=s=>incomeParts(s).total;
 const growthParts=s=>[['Base',0.8],['Farms',s.bld.farms*0.6],['Taxes',TAX_GROW[s.tax]],['Room to grow (village)',tier(s)===1?0.5:0],['Grain',hasRes(s,'grain')?0.5:0],
@@ -993,7 +1044,7 @@ const upkeepOf=units=>units.reduce((a,u)=>a+UNITS[u.type].upk,0);
 const upkeep=f=>ownedBy(f).reduce((a,s)=>a+upkeepOf(s.units),0)+heldPasses(f).reduce((a,s)=>a+upkeepOf(s.units),0);
 const grossIncome=f=>ownedBy(f).reduce((a,s)=>a+income(s),0);
 const netIncome=f=>grossIncome(f)-upkeep(f);
-const canRecruit=(s,t)=>{const r=UNITS[t].req;return !r||s.bld[r.b]>=r.lv;};
+const canRecruit=(s,t)=>{const r=UNITS[t].req;return(!r||s.bld[r.b]>=r.lv)&&!besieged(s);};
 const recruitXp=s=>Math.min(3,(hasRes(s,'iron')?1:0)+marsXp(s)+(hasWonder(s.owner,'gymnasium')?1:0)); // experience a new unit from s starts with
 const unitCost=(s,t)=>UNITS[t].kind==='cav'&&hasRes(s,'horses')?Math.round(UNITS[t].cost*.75/10)*10:UNITS[t].cost;
 function trainUnit(s,t){const u=mkUnit(t,true);u.xp=recruitXp(s);return u;}
@@ -1103,8 +1154,8 @@ function buildRoads(){
 }
 const starPath=(cx,cy,r)=>{let p='';for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,rr=i%2?r*.45:r;p+=(i?'L':'M')+(cx+rr*Math.cos(a)).toFixed(1)+','+(cy+rr*Math.sin(a)).toFixed(1);}return p+'Z';};
 function renderNodes(){
+  tidyPasses();if(!UI.busy)tidySieges(); // not mid-march: an assaulting army is briefly away from its siege camp
   if(CM.on)return cmSync();
-  tidyPasses();
   const mv=UI.move,adj=mv?new Set(moveTargets(mv.from)):null,dz=dangerScan();let routes='',h='';
   const seg=(a,b,cls)=>{const c=segCurve(a,b);routes+=`<path class="${cls}" d="M${c.x0},${c.z0} Q${c.cx},${c.cz} ${c.x1},${c.z1}"/>`;};
   for(const k in G.roads){const[a,b]=k.split('|');seg(a,b,'road paved');} // paved roads first, under the highlights
@@ -1112,7 +1163,7 @@ function renderNodes(){
   else{for(const p of orderPaths())for(let i=0;i+1<p.length;i++)seg(p[i],p[i+1],'route-plan'); // armies under march orders: the road still ahead of them
     const d=UI.sel&&dz[UI.sel];if(d)seg(d.from,UI.sel,'route-hl foe');} // where the threat to the picked city would come from
   for(const n of PNODES){ // passes and forts: a diamond on the road, a flag colour for whoever holds it
-    const s=G.s[n.id],col=s.owner?FACTIONS[s.owner].color:'#9a9486',isT=adj&&adj.has(n.id),fort=s.bld.walls;
+    const s=seen(G.s[n.id]),col=s.owner?FACTIONS[s.owner].color:'#9a9486',isT=adj&&adj.has(n.id),fort=s.bld.walls;
     h+=`<g class="node pass${isT&&isFoeTarget(n.id)?' foe':''}" data-id="${n.id}" transform="translate(${n.x.toFixed(1)},${n.y.toFixed(1)})"><circle class="hit" r="20"/>`;
     if(isT)h+=`<circle class="tgt-ring" r="16"/>`;
     if(UI.sel===n.id||(mv&&mv.from===n.id))h+=`<circle class="sel-ring" r="15"/>`;
@@ -1124,6 +1175,7 @@ function renderNodes(){
     if(s.units.length){const ready=s.owner===PLAYER&&s.units.some(u=>!u.moved);
       h+=`<g class="badge${ready?' ready':''}" transform="translate(13,-9)"><rect x="-9" y="-8" width="18" height="16" rx="3" fill="${col}"/><text y="4">${s.units.length}</text></g>`;}
     if(myBuild(s))h+=`<text x="-20" y="-6" font-size="12">🔨</text>`;
+    if(s.amb&&s.owner===PLAYER)h+=`<text x="-22" y="8" font-size="12">🌿</text>`;
     h+='</g>';}
   for(const n of NODES){
     const s=G.s[n.id],F=FACTIONS[s.owner],r=6+tier(s)*2,isT=adj&&adj.has(n.id);
@@ -1139,6 +1191,7 @@ function renderNodes(){
     if(s.units.length){const ready=s.owner===PLAYER&&s.units.some(u=>!u.moved);
       h+=`<g class="badge${ready?' ready':''}" transform="translate(${r+7},${-r-3})"><rect x="-9" y="-8" width="18" height="16" rx="3" fill="${F.color}"/><text y="4">${s.units.length}</text></g>`;}
     if(s.build&&s.owner===PLAYER)h+=`<text x="${-r-10}" y="${-r+2}" font-size="12">🔨</text>`;
+    if(besieged(s))h+=`<text x="${-r-12}" y="${r+4}" font-size="13">⛺</text>`;
     h+='</g>';
   }
   $('#lRoutes').innerHTML=routes;$('#lNodes').innerHTML=h;
@@ -1201,7 +1254,7 @@ function unitCard(u,fid,opt={}){
   return`<button class="${cls}" data-uid="${u.uid}" ${opt.disabled?'disabled':''}>${symSvg(T.kind,FACTIONS[fid].color,36)}<div class="main"><div class="uname">${T.name} ${xpStars(u.xp)}</div><div class="umeta">${u.men}/${T.men} · ${opt.tag||KIND_NAME[T.kind]}</div><div class="ubar"><i style="width:${pct}%;background:${pct<40?'var(--bad)':pct<75?'var(--warn)':'var(--good)'}"></i></div></div></button>`;
 }
 function renderPassSheet(s){
-  const n=NODE[s.id],held=s.units.length>0,mine=held&&s.owner===PLAYER,F=s.owner&&(held||s.bld.walls)?FACTIONS[s.owner]:null,fort=s.bld.walls;
+  s=seen(s);const n=NODE[s.id],held=s.units.length>0,mine=held&&s.owner===PLAYER,F=s.owner&&(held||s.bld.walls)?FACTIONS[s.owner]:null,fort=s.bld.walls;
   let h=`<div class="sh-head"><div class="sh-flag" style="background:${F?F.color:'#9a9486'}"></div><div><h3>${n.name}</h3><div class="sh-sub">${fort?FORT_NAME[fort]:LAND_NAME[n.land]} on the road ${NODE[n.a].name} – ${NODE[n.b].name}${F?' · '+F.name:''}</div></div><button class="sh-x" id="shX" aria-label="Close">×</button></div>`;
   h+=`<div class="chips"><span class="chip">${LAND_NAME[n.land]}</span>${fort?`<span class="chip">${BUILD.walls.lv[fort-1]}</span>`:''}<span class="chip">${held?`${s.units.length} units · ${fmt(sumMen(s.units))} men`:'Nobody holds it'}</span></div>`;
   if(mine){
@@ -1209,6 +1262,7 @@ function renderPassSheet(s){
     if(s.build)fh=`<div class="row"><div class="ico">🔨</div><div class="main"><div class="t">Building a ${FORT_NAME[s.build.lv].toLowerCase()}</div><div class="d">${s.build.t} turn${s.build.t>1?'s':''} left</div></div></div>`;
     else if(fort<2){const cost=FORT_COST[fort+1];fh=`<div class="row"><div class="ico">🏰</div><div class="main"><div class="t">${fort?'Upgrade to a':'Build a'} ${FORT_NAME[fort+1].toLowerCase()}</div><div class="d">${fmt(cost)} gold · ${FORT_TURNS[fort+1]} turns · defenders fight much harder behind walls</div></div><button class="btn gold sm" data-fort="1" ${G.gold[PLAYER]<cost?'disabled':''}>Build</button></div>`;}
     const n2=UI.pick.size;
+    if(canAmb(s))fh+=`<div class="row"><div class="ico">🌿</div><div class="main"><div class="t">${s.amb?'Lying in ambush':'Lie in ambush'}</div><div class="d">${s.amb?'Hidden from your enemies. An army that marches down this road walks into your trap; you show yourselves when the fighting starts.':'Hide the army in the '+(n.land==='forest'?'woods':'hills')+' beside the road: enemies won’t see it on the map, and whoever marches through is caught strung out in column.'}</div></div><button class="btn ${s.amb?'ghost':'gold'} sm" data-amb="1">${s.amb?'Show yourselves':'Hide'}</button></div>`;
     h+=`<div class="sh-body">${dangerRow(s)}${orderRows(s)}<div class="note">While your army holds this pass, the road is closed: an enemy must defeat you here before he can march through. Select units to march them to either end of the road, or to a city farther off.</div><div class="ugrid">${s.units.map(u=>unitCard(u,PLAYER,{pick:UI.pick.has(u.uid),dim:u.moved,tag:armyTag(u)})).join('')}</div><div style="margin-top:10px">${fh}</div></div>`;
     h+=`<div class="sh-foot"><button class="btn ghost sm" id="pkAll">All</button><button class="btn ghost sm" id="pkDis" ${n2===1?'':'disabled'}>Disband</button><button class="btn primary grow" id="pkMarch" ${n2?'':'disabled'}>March ${n2?n2+' unit'+(n2>1?'s':''):''}</button></div>`;
   }else{
@@ -1231,9 +1285,11 @@ function renderPassSheet(s){
     const ok=await modal({title:'Disband unit?',body:`<p>${UNITS[u.type].name} will be sent home. You save ${UNITS[u.type].upk} gold upkeep per turn.</p>`,buttons:[{label:'Disband',value:1,cls:'primary'},{label:'Keep',value:0}]});
     if(ok){s.units=s.units.filter(x=>x!==u);UI.pick.delete(uid);save();render();}};
   const fb=sh.querySelector('[data-fort]');if(fb)fb.onclick=()=>doFort(s);
+  const ab=sh.querySelector('[data-amb]');if(ab)ab.onclick=()=>{s.amb=s.amb?null:true;UI.undo=[];AU.ui('select');toast(s.amb?`Your army at ${sname(s)} lies hidden beside the road`:`Your army at ${sname(s)} stands in the open`);save();render();};
   sh.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>stopOrder(+b.dataset.stop));
+  sh.querySelectorAll('[data-lift]').forEach(b=>b.onclick=()=>liftSiege(+b.dataset.lift));
 }
-function doFort(s){const lv=s.bld.walls+1,c=FORT_COST[lv];if(s.build||lv>2||G.gold[PLAYER]<c||!s.units.length)return;
+function doFort(s){const lv=s.bld.walls+1,c=FORT_COST[lv];if(s.build||lv>2||G.gold[PLAYER]<c||!s.units.length)return;s.amb=null; // a fort can't be hidden
   G.gold[PLAYER]-=c;s.build={lv,t:FORT_TURNS[lv],by:PLAYER};UI.undo=[]; // the army is committed to the spot once it starts building
   toast(`Construction started: ${FORT_NAME[lv]} at ${sname(s)}`);AU.ui('hammer');save();render();}
 function renderSheet(){
@@ -1253,10 +1309,11 @@ function renderSheet(){
     }
   }else{
     h+=`<div class="chips"><span class="chip">${s.units.length} units · ${fmt(sumMen(s.units))} men</span>${s.bld.walls?`<span class="chip">${BUILD.walls.lv[s.bld.walls-1]}</span>`:'<span class="chip">No walls</span>'}</div>`;
-    h+=`<div class="sh-body">${s.units.length?`<div class="ugrid">${s.units.map(u=>unitCard(u,s.owner,{disabled:true})).join('')}</div>`:'<div class="note">The city is undefended. Any army that marches in takes it.</div>'}`;
+    const q=siegeOf(s.id,PLAYER);
+    h+=`<div class="sh-body">${q?`<div class="row chk"><div class="ico">⛺</div><div class="main"><div class="t">Besieged from ${NODE[q.from].name}${q.t?` · turn ${q.t}`:''}</div><div class="d">${q.t?`${siegeKit(q).rams} rams and ${siegeKit(q).ladders} ladders are ready. `:'Rams and ladders will be ready next turn. '}The city pays no taxes and raises no troops${q.t>=2?', and its garrison is starving':'; from the second turn its garrison starves'}.</div></div></div>`:''}${s.units.length?`<div class="ugrid">${s.units.map(u=>unitCard(u,s.owner,{disabled:true})).join('')}</div>`:'<div class="note">The city is undefended. Any army that marches in takes it.</div>'}`;
     const from=ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner===PLAYER&&t.units.some(u=>!u.moved));
     if(from.length){h+=`<div class="note" style="margin-top:10px">Attack from a neighbouring city:</div>`+from.map(t=>{const av=t.units.filter(u=>!u.moved);
-      const g=gateOn(t.id,s.id),blk=blocksFor(g,PLAYER);
+      const g=gateOn(t.id,s.id),blk=seenBlock(g);
       return`<div class="row"><div class="ico">⚔️</div><div class="main"><div class="t">${sname(t)}</div><div class="d">${av.length} ready units · ${fmt(sumMen(av))} men</div>${blk?`<div class="d neg">${sname(g)} is held — you fight there first</div>`:''}</div><button class="btn primary sm" data-atk="${t.id}">${blk?'Advance':'Attack'}</button></div>`;}).join('');}
     else if(ADJ[s.id].some(id=>G.s[id].owner===PLAYER))h+=`<div class="note" style="margin-top:10px">Your neighbouring armies have already marched this turn.</div>`;
     else h+=`<div class="note" style="margin-top:10px">Not next to any of your cities yet.</div>`;
@@ -1280,16 +1337,19 @@ function renderSheet(){
   sh.querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>doRecruit(s,b.dataset.rec));
   sh.querySelectorAll('[data-tax]').forEach(b=>b.onclick=()=>{s.tax=+b.dataset.tax;save();render();});
   sh.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>stopOrder(+b.dataset.stop));
+  sh.querySelectorAll('[data-lift]').forEach(b=>b.onclick=()=>liftSiege(+b.dataset.lift));
 }
 function tabArmy(s){
   if(!s.units.length)return dangerRow(s)+'<div class="note">No troops here. Recruit units, or march an army in from a neighbouring city.</div>';
   return`${dangerRow(s)}${orderRows(s)}<div class="note">Tap units to select them, then march to a neighbouring city, or camp on a pass along the road. Each army marches one stop per turn (two when the first is along a paved road between your cities) — tap a city farther off and it marches on by itself, turn after turn.</div><div class="ugrid">${s.units.map(u=>unitCard(u,PLAYER,{pick:UI.pick.has(u.uid),dim:u.moved,tag:armyTag(u)})).join('')}</div>`;
 }
-function dangerRow(s){const d=dangerTo(s);if(!d)return'';
-  return`<div class="row chk"><div class="ico">⚠️</div><div class="main"><div class="t">In danger</div><div class="d">The ${FACTIONS[d.f].adj} army at ${NODE[d.from].name} — ${d.n} unit${d.n>1?'s':''}, ${fmt(d.men)} men — is strong enough to attack ${sname(s)} once you end the turn. Reinforce it, or expect a fight.</div></div></div>`;}
-function orderRows(s){return G.orders.map((o,i)=>{const n=o.at===s.id?s.units.filter(u=>o.uids.includes(u.uid)).length:0;if(!n)return'';const p=routeTo(o.at,o.to);
+function dangerRow(s){const d=dangerTo(s),sr=s.pass?'':siegeRow(s);if(!d)return sr;
+  return sr+`<div class="row chk"><div class="ico">⚠️</div><div class="main"><div class="t">In danger</div><div class="d">The ${FACTIONS[d.f].adj} army at ${NODE[d.from].name} — ${d.n} unit${d.n>1?'s':''}, ${fmt(d.men)} men — is strong enough to attack ${sname(s)} once you end the turn. Reinforce it, or expect a fight.</div></div></div>`;}
+function siegeRows(s){return G.sieges.map((q,i)=>q.from!==s.id||qf(q)!==PLAYER?'':`<div class="row q"><div class="ico">⛺</div><div class="main"><div class="t">Besieging ${NODE[q.to].name}</div><div class="d">${q.uids.length} unit${q.uids.length>1?'s':''} · ${q.t?`turn ${q.t} · ${siegeKit(q).rams} rams, ${siegeKit(q).ladders} ladders`:'digging in'} · attack ${NODE[q.to].name} to storm it</div></div><button class="qx" data-lift="${i}" aria-label="Lift the siege">✕</button></div>`).join('');}
+function liftSiege(i){const q=G.sieges[i];if(!q)return;G.sieges.splice(i,1);toast(`Siege of ${NODE[q.to].name} lifted`);save();render();}
+function orderRows(s){return siegeRows(s)+G.orders.map((o,i)=>{const n=o.at===s.id?s.units.filter(u=>o.uids.includes(u.uid)).length:0;if(!n)return'';const p=routeTo(o.at,o.to);
   return`<div class="row q"><div class="ico">🚩</div><div class="main"><div class="t">Marching to ${NODE[o.to].name}</div><div class="d">${n} unit${n>1?'s':''} · ${p?ordEta(p,o.to):'no safe road leads there now'}</div></div><button class="qx" data-stop="${i}" aria-label="Stop this march">✕</button></div>`;}).join('');}
-const armyTag=u=>{const o=G.orders.find(o=>o.uids.includes(u.uid));return o?'→ '+NODE[o.to].name:u.moved?'Done this turn':u.hop?'🛣️ One more stop':null;};
+const armyTag=u=>{const o=G.orders.find(o=>o.uids.includes(u.uid)),q=G.sieges.find(q=>q.uids.includes(u.uid));return q?'⛺ '+NODE[q.to].name:o?'→ '+NODE[o.to].name:u.moved?'Done this turn':u.hop?'🛣️ One more stop':null;};
 const turnsTxt=n=>`${n} turn${n>1?'s':''}`;
 function tabBuild(s){
   const n=(s.build?1:0)+s.queue.length,full=n>=BUILD_MAX,gold=G.gold[PLAYER];
@@ -1315,7 +1375,7 @@ function tabBuild(s){
   if(land.length){h+='<div class="qcap">Roads</div>';
     for(const id of land){const o=G.s[id],N=NODE[id].name;let btn,d;
       if(paved(s.id,id)){btn='<button class="btn ghost sm" disabled>Paved</button>';
-        d=o.owner!==PLAYER?`Of use again once ${N} is yours`:blocksFor(gateOn(s.id,id),PLAYER)?'A hostile camp on the road cuts it':`Armies march on along it · trade +${tradeOn(s,id)} gold a turn`;}
+        d=o.owner!==PLAYER?`Of use again once ${N} is yours`:seenBlock(gateOn(s.id,id))?'A hostile camp on the road cuts it':`Armies march on along it · trade +${tradeOn(s,id)} gold a turn`;}
       else{const by=pavingOn(s.id,id);
         if(by){btn='<button class="btn ghost sm" disabled>Queued</button>';d=by===s?'Paving is lined up here':`${N} is paving it`;}
         else{const c=projCost(s,{k:'road',to:id}),own=o.owner===PLAYER;d=`Pave it · ${fmt(c)} gold · ${turnsTxt(roadTurns(s.id,id))}`;
@@ -1432,7 +1492,9 @@ async function executeMove(toId,dest){ // dest: where a march order sends the ar
   const from=G.s[UI.move.from],units=from.units.filter(u=>UI.move.uids.includes(u.uid)&&!u.moved);let to=G.s[toId];
   cancelMove();closeSheet();if(!units.length)return;AU.ui('march');
   const gate=!from.pass&&!to.pass?gateOn(from.id,toId):null; // an enemy army holding a pass on the road stops the march there
-  if(blocksFor(gate,PLAYER)){to=gate;toast(`${sname(gate)} is held — your army must break through it first`);}
+  const trap=hidAmb(gate)?gate:hidAmb(to)?to:null; // ...and one lying in ambush there is only found when the army walks into it
+  if(trap)to=trap;
+  else if(blocksFor(gate,PLAYER)){to=gate;toast(`${sname(gate)} is held — your army must break through it first`);}
   const fromOwner=from.owner; // for undo
   if(to.owner===PLAYER){
     const n=Math.min(units.length,MAX_UNITS-to.units.length);if(n<=0)return toast(`${sname(to)} already holds 12 units`);
@@ -1453,11 +1515,18 @@ async function executeMove(toId,dest){ // dest: where a march order sends the ar
       const bare=to.pass&&!to.owner,was=bare?{owner:to.owner,build:to.build&&{...to.build}}:null; // camping on an unclaimed pass takes nothing from anyone, so it can be undone
       await cmMarch(from.id,to.id,PLAYER,units);from.units=from.units.filter(u=>!units.includes(u));const prev=dropOrders(units);await capture(to,PLAYER,units,from);
       if(bare&&to.owner===PLAYER)UI.undo.push({from:from.id,to:to.id,uids:to.units.filter(u=>units.includes(u)).map(u=>u.uid),prev,ord:null,fromOwner,pass:was});}
+    else if(trap){ // ambushed on the road: there is no turning back
+      await cmMarch(from.id,to.id,PLAYER,units);from.units=from.units.filter(u=>!units.includes(u));units.forEach(u=>u.moved=true);dropOrders(units);
+      await doBattle({attFid:PLAYER,units,from,to,ambush:true});}
     else{
-      const rel=reliefFor(to,to.owner,from);
-      const mode=await modal({title:`Battle for ${sname(to)}`,body:forcesBody(units,to.units.concat(rel.flatMap(r=>r.units)),to.bld.walls,'Your army',FACTIONS[to.owner].name,true,reliefNote(rel,true)),
-        buttons:[{label:'⚔ Command the battle',value:'command',cls:'primary'},{label:'Auto-resolve',value:'auto',cls:'ghost'},{label:'Cancel',value:'cancel',cls:'ghost'}]});
-      if(mode!=='cancel'){await cmMarch(from.id,to.id,PLAYER,units);from.units=from.units.filter(u=>!units.includes(u));units.forEach(u=>u.moved=true);dropOrders(units);await doBattle({attFid:PLAYER,units,from,to,mode});}
+      const rel=reliefFor(to,to.owner,from),q=!to.pass&&siegeOf(to.id,PLAYER),mine=q&&q.from===from.id,walled=!to.pass&&to.bld.walls>0;
+      const wE=to.bld.walls*(mine&&q.t>=1?.5:1),note=[reliefNote(rel,true),mine?siegeNote(q,from.id):walled?'The gates will be shut: you have only an improvised ram. Besiege the city first for rams and ladders, and to starve the garrison.':''].filter(Boolean).join('<br>');
+      const mode=await modal({title:`${walled?'Assault on':'Battle for'} ${sname(to)}`,body:forcesBody(units,to.units.concat(rel.flatMap(r=>r.units)),wE,'Your army',FACTIONS[to.owner].name,true,note,to.bld.walls),
+        buttons:[{label:walled?'⚔ Storm the walls':'⚔ Command the battle',value:'command',cls:'primary'},{label:'Auto-resolve',value:'auto',cls:'ghost'},...(walled&&!mine?[{label:'⛺ Besiege',value:'siege',cls:'gold'}]:[]),{label:'Cancel',value:'cancel',cls:'ghost'}]});
+      if(mode==='siege'){ // the army digs in before the walls, where it stands
+        units.forEach(u=>u.moved=true);dropOrders(units);G.sieges=G.sieges.filter(x=>!(x.to===to.id&&qf(x)===PLAYER));G.sieges.push({to:to.id,from:from.id,fid:PLAYER,uids:units.map(u=>u.uid),t:0});UI.undo=[];AU.ui('hammer');
+        toast(`Your army lays siege to ${sname(to)} — rams and ladders will be ready next turn`);}
+      else if(mode!=='cancel'){await cmMarch(from.id,to.id,PLAYER,units);from.units=from.units.filter(u=>!units.includes(u));units.forEach(u=>u.moved=true);dropOrders(units);await doBattle({attFid:PLAYER,units,from,to,mode});}
     }
   }finally{UI.busy=false;}
   save();render();checkEnd();
@@ -1484,7 +1553,7 @@ function routeTo(from,dest){ // the shortest road from `from` to `dest` through 
   while(q.length){const c=q.shift();
     for(const m of moveTargets(c)){
       if(m in prev||(PNODE[m]&&m!==dest))continue; // a march goes down a road in one stop; it halts on a pass only when sent there
-      if(!PNODE[c]&&!PNODE[m]&&blocksFor(gateOn(c,m),PLAYER))continue;
+      if(!PNODE[c]&&!PNODE[m]&&seenBlock(gateOn(c,m)))continue;
       prev[m]=c;
       if(m===dest){const p=[];for(let x=m;x!==null;x=prev[x])p.unshift(x);return p;}
       if(G.s[m].owner===PLAYER)q.push(m);}}
@@ -1516,6 +1585,10 @@ async function runOrders(){ // at the start of each turn, armies under orders ma
       const nx=p[1],to=G.s[nx];
       if(isFoeTarget(nx)){report('⚑',`Your army has reached ${sname(at)} and stands before ${D}. The attack is yours to order.`,o.at);go=false;break;}
       if(to.owner===PLAYER&&to.units.length+us.length>MAX_UNITS){report('⏸️',`The army bound for ${D} waits in ${sname(at)}: ${sname(to)} has no room for it.`,o.at);keep.push(o);go=false;break;}
+      const g0=!PNODE[o.at]&&!PNODE[nx]?gateOn(o.at,nx):null,trap=hidAmb(g0)?g0:hidAmb(to)?to:null;
+      if(trap){ // an ambush on the road: the march ends in a battle
+        await cmMarch(o.at,trap.id,PLAYER,us,true);at.units=at.units.filter(u=>!us.includes(u));us.forEach(u=>u.moved=true);
+        await doBattle({attFid:PLAYER,units:us,from:at,to:trap,ambush:true});go=false;break;}
       const quick=quickRoad(o.at,nx,PLAYER)&&us.every(u=>!u.hop);
       await cmMarch(o.at,nx,PLAYER,us,true);
       at.units=at.units.filter(u=>!us.includes(u));us.forEach(u=>{if(quick)u.hop=1;else u.moved=true;});
@@ -1532,7 +1605,7 @@ function reliefFor(to,defFid,from){
   if(!to.units.length||!defFid||defFid==='rebels')return[];
   const out=[];let left=RELIEF_MAX,k=0;
   for(const id of moveTargets(to.id)){
-    const s=G.s[id];if(!s||s===from||s.owner!==defFid||!s.units.length||left<=0)continue;
+    const s=G.s[id];if(!s||s===from||s.owner!==defFid||!s.units.length||left<=0||(s.pass&&s.amb))continue; // an ambush stays hidden
     if(!s.pass&&!to.pass&&blocksFor(gateOn(s.id,to.id),defFid))continue;
     let av=s.units.filter(u=>!u.moved&&u.men>=UNITS[u.type].men*.4).sort((a,b)=>unitPower(b)-unitPower(a));
     if(!s.pass||s.bld.walls)av=av.slice(0,Math.max(0,Math.min(av.length,s.units.length-1,s.pass?av.length:Math.floor(av.length/2))));
@@ -1546,18 +1619,18 @@ function reliefNote(rel,foe){
   const n=rel.reduce((a,r)=>a+r.units.length,0),at=rel.map(r=>sname(r.src)).join(' and ');
   return foe?`The defenders expect ${n} more unit${n>1?'s':''} from ${at} as the battle goes on.`:`Relief: ${n} unit${n>1?'s':''} from ${at} will join the battle after the first clashes.`;
 }
-function forcesBody(att,def,walls,attName,defName,playerAtt,note){
+function forcesBody(att,def,walls,attName,defName,playerAtt,note,wl=walls){ // walls: what they count for (a siege halves them); wl: the walls that stand
   const ap=armyPower(att),dp=armyPower(def)*(1+.15*walls),ratio=playerAtt?ap/Math.max(1,dp):dp/Math.max(1,ap);
   const odds=ratio>1.6?['Overwhelming','good']:ratio>1.15?['Favourable','good']:ratio>.87?['Even','warn']:ratio>.6?['Unfavourable','bad']:['Desperate','bad'];
   const side=(us,nm)=>`<div class="side"><div class="nm">${nm}</div><div class="icons">${us.map(u=>symSvg(UNITS[u.type].kind,FACTIONS[ownerOfUnit(u)].color,20)).join('')}</div><div class="d">${us.length} units<br>${fmt(sumMen(us))} men</div></div>`;
-  return`<div class="vs">${side(att,attName)}<div class="vsx">VS</div>${side(def,defName)}</div><div class="odds ${odds[1]}">Your odds: <b>${odds[0]}</b>${walls?`<br>Defenders hold ${BUILD.walls.lv[walls-1]}`:''}${note?`<br><small>${note}</small>`:''}</div>`;
+  return`<div class="vs">${side(att,attName)}<div class="vsx">VS</div>${side(def,defName)}</div><div class="odds ${odds[1]}">Your odds: <b>${odds[0]}</b>${wl?`<br>Defenders hold ${BUILD.walls.lv[wl-1]}`:''}${note?`<br><small>${note}</small>`:''}</div>`;
 }
 const unitOwner=new WeakMap();
 function ownerOfUnit(u){if(unitOwner.has(u))return unitOwner.get(u);for(const n of ALLN)if(G.s[n.id].units.includes(u))return G.s[n.id].owner;return PLAYER;}
 
 /* ================= BATTLE RESOLUTION ================= */
-function autoResolve(att,def,walls){
-  const A=armyPower(att)*rnd(.8,1.2),D=armyPower(def)*(1+.15*walls)*rnd(.8,1.2),aw=A>D,r=Math.min(A,D)/Math.max(A,D,1);
+function autoResolve(att,def,walls,dk=1){ // dk: the defenders' edge (an ambush)
+  const A=armyPower(att)*rnd(.8,1.2),D=armyPower(def)*(1+.15*walls)*dk*rnd(.8,1.2),aw=A>D,r=Math.min(A,D)/Math.max(A,D,1);
   const wl=.05+.4*r*r,ll=.45+.35*r;
   const hit=(us,f)=>{for(const u of us){const mx=UNITS[u.type].men;u.men=Math.max(0,Math.round(u.men*(1-clamp(f*rnd(.7,1.3),0,1))));if(u.men<mx*.12)u.men=0;}};
   hit(att,aw?wl:ll);hit(def,aw?ll:wl);
@@ -1569,27 +1642,31 @@ async function doBattle(o){
   const rel=reliefFor(to,defFid,from),relUnits=rel.flatMap(r=>r.units),defAll=defUnits.concat(relUnits); // relief armies fight beside the garrison
   units.forEach(u=>unitOwner.set(u,attFid));defAll.forEach(u=>unitOwner.set(u,defFid));
   const pInv=attFid===PLAYER||defFid===PLAYER,pAtt=attFid===PLAYER;let mode=o.mode;
-  const preA=sumMen(units),preD=sumMen(defAll);
+  const preA=sumMen(units),preD=sumMen(defAll),amb=!!o.ambush,ak=amb?1.3:1,powA=armyPower(units),powD=armyPower(defAll)*(1+.15*to.bld.walls)*ak; // the odds, for grading the result
+  const q=!to.pass?siegeOf(to.id,attFid):null,kit=siegeKit(q&&q.from===from.id?q:null),wE=to.bld.walls*(kit.ramK===1?.5:1); // a prepared siege halves what the walls are worth
   if(pInv&&!mode){
-    AU.ui('alarm');
-    mode=await modal({title:`${sname(to)} is under attack!`,body:`<p>The ${FACTIONS[attFid].adj} army marches from ${sname(from)}.</p>`+forcesBody(units,defAll,to.bld.walls,FACTIONS[attFid].name,to.pass?'Your men there':'Your garrison',false,reliefNote(rel,false)),
-      buttons:[{label:'⚔ Command the defence',value:'command',cls:'primary'},{label:'Auto-resolve',value:'auto',cls:'ghost'}]});
+    AU.ui('alarm');const st=amb?(pAtt?{t:`Ambush at ${sname(to)}!`,p:`<p>As your army marches through ${sname(to)}, the ${FACTIONS[defFid].adj} army that lay hidden there falls on it from both sides of the road.</p>`,b:'⚔ Fight your way out'}:{t:`Your ambush at ${sname(to)}!`,p:`<p>The ${FACTIONS[attFid].adj} army from ${sname(from)} marches straight into the men you hid at ${sname(to)}.</p>`,b:'⚔ Spring the ambush'})
+      :{t:`${sname(to)} is under attack!`,p:`<p>The ${FACTIONS[attFid].adj} army marches from ${sname(from)}.${kit.ramK===1?` After their siege they bring ${kit.rams} rams and ${kit.ladders} ladders.`:''}</p>`,b:'⚔ Command the defence'};
+    mode=await modal({title:st.t,body:st.p+forcesBody(units,defAll,wE,pAtt?'Your army':FACTIONS[attFid].name,pAtt?FACTIONS[defFid].name:to.pass?'Your men there':'Your garrison',pAtt,reliefNote(rel,pAtt),to.bld.walls),
+      buttons:[{label:st.b,value:'command',cls:'primary'},{label:'Auto-resolve',value:'auto',cls:'ghost'}]});
   }
   let attWon;
   if(pInv&&mode==='command'){
     const relArr=rel.flatMap(r=>r.units.map(cu=>({cu,delay:r.delay,rx:r.rx})));
     const res=await runBattle({title:`${to.pass?'Battle at':'Battle of'} ${sname(to)}`,playerIsAttacker:pAtt,pUnits:pAtt?units:defUnits,eUnits:pAtt?defUnits:units,eFid:pAtt?defFid:attFid,walls:to.bld.walls,
-      field:!!to.pass&&!to.bld.walls,fort:!!to.pass&&!!to.bld.walls,land:to.pass?NODE[to.id].land:null,pRelief:pAtt?[]:relArr,eRelief:pAtt?relArr:[]});
+      field:!!to.pass&&!to.bld.walls,fort:!!to.pass&&!!to.bld.walls,land:to.pass?NODE[to.id].land:null,pRelief:pAtt?[]:relArr,eRelief:pAtt?relArr:[],ambush:amb,...kit});
     if(res)attWon=pAtt?res.winnerSide===0:res.winnerSide===1;
-    else{mode='auto';attWon=autoResolve(units,defAll,to.bld.walls);}
-  }else attWon=autoResolve(units,defAll,to.bld.walls);
+    else{mode='auto';attWon=autoResolve(units,defAll,wE,ak);}
+  }else attWon=autoResolve(units,defAll,wE,ak);
+  if(amb)to.amb=null; // sprung: everyone knows where they are now
   const attAlive=units.filter(u=>u.men>0),defAlive=defUnits.filter(u=>u.men>0);
   if(attWon&&!attAlive.length)attWon=false;
   const lostA=preA-sumMen(attAlive),lostD=preD-sumMen(defAll.filter(u=>u.men>0));
   for(const r of rel){r.src.units=r.src.units.filter(u=>u.men>0);r.units.forEach(u=>{if(u.men>0)u.moved=true;});} // the dead are struck from their rolls; the rest go back to their posts spent
   if(pInv&&mode==='auto'){
     const won=pAtt?attWon:!attWon;AU.stinger(won?'victory':'defeat');
-    await modal({title:won?'Victory':'Defeat',body:`<p>${won?(pAtt?`Your army has broken the defenders of ${sname(to)}.`:`The garrison of ${sname(to)} holds firm.`):(pAtt?`Your army was thrown back from ${sname(to)}.`:`${sname(to)} has fallen.`)}</p><p>${FACTIONS[PLAYER].adj} losses: <b>${fmt(pAtt?lostA:lostD)}</b> men<br>Enemy losses: <b>${fmt(pAtt?lostD:lostA)}</b> men</p>`,buttons:[{label:'Continue',value:1,cls:'primary'}]});
+    const gr=pAtt?battleGrade(won,preA,lostA,preD,lostD,powA/Math.max(1,powD)):battleGrade(won,preD,lostD,preA,lostA,powD/Math.max(1,powA));
+    await modal({title:gr[0],body:`<p><i>${gr[1]}</i></p><p>${amb?(won?(pAtt?`Your army fought its way out of the ambush at ${sname(to)}.`:`Your ambush at ${sname(to)} cut them to pieces.`):(pAtt?`Your army was cut to pieces in the ambush at ${sname(to)}.`:`Your ambush at ${sname(to)} was beaten off.`)):won?(pAtt?`Your army has broken the defenders of ${sname(to)}.`:`The garrison of ${sname(to)} holds firm.`):(pAtt?`Your army was thrown back from ${sname(to)}.`:`${sname(to)} has fallen.`)}</p><p>${FACTIONS[PLAYER].adj} losses: <b>${fmt(pAtt?lostA:lostD)}</b> men<br>Enemy losses: <b>${fmt(pAtt?lostD:lostA)}</b> men</p>`,buttons:[{label:'Continue',value:1,cls:'primary'}]});
   }
   if(attWon){
     to.units=[];
@@ -1680,6 +1757,8 @@ const GQ={ // pixel ratio cap, shadow map size, grass tufts on the battlefield, 
 let gfx=window.matchMedia&&matchMedia('(pointer:coarse)').matches?'medium':'high';try{const v=localStorage.getItem(GFX_KEY);if(GFXS.includes(v))gfx=v;}catch(e){}
 const gfxPR=()=>Math.min(GQ[gfx].pr,window.devicePixelRatio||1);
 const GATES=[-62,0,62],GATE_W=20,AVE_W=20; // the town's three avenues run back from the gates (and sit in the same places when there are no walls)
+/* sieges: the gates are shut to the attackers. A ram breaks one (an improvised ram, a felled trunk, works slower), ladders carry a unit over the wall, and the defenders hold the town square */
+const RAM_T=[0,14,32,48],HACK_T=70,CLIMB_T=9,WALL_H=[0,3.2,4,5.5],TOWER_FIRE=[0,0,.5,.9],PLAZA_T=60,SIEGE_TIME=600; // seconds for a ram to break a gate by wall level; a palisade gate can be hacked down with axes; tower fire: men per second lost at a stone gate
 const STATE_NAME={ok:'Steady',waver:'Wavering',rout:'Routing',dead:'Destroyed',fled:'Fled',reserve:'On the way'};
 
 let B=null;
@@ -1774,12 +1853,26 @@ function heightAt(x,z){
 const forestAt=(x,z)=>B.ter.woods.some(W=>(x-W.x)**2+(z-W.z)**2<W.r*W.r);
 const inTown=u=>!B.field&&u.z*B.ter.ts>WALL_Z;
 const atGate=x=>GATES.some(g=>Math.abs(x-g)<GATE_W/2);
-function wallWaypoint(u,tx,tz){ // armies cross the walls only through the gates
-  if(!B.walls)return null;const wz=WALL_Z*B.ter.ts,s1=Math.sign(u.z-wz);
+const gateOpen=(g,u)=>g.open||u.side===B.defSide; // the defenders' own gates open for them
+const ladderAt=x=>B.lad.find(l=>Math.abs(l.x-x)<5);
+function wallWaypoint(u,tx,tz){ // armies cross the walls through an open gate or over a ladder; shut out, they make for a gate to break it. [x, z, kind, gate or ladder x]
+  if(!B.walls||B.field)return null;const wz=WALL_Z*B.ter.ts,s1=Math.sign(u.z-wz);
   if(!s1||s1===Math.sign(tz-wz))return null;
-  const xc=u.x+(tx-u.x)*(wz-u.z)/(tz-u.z);if(Math.abs(u.z-wz)<6&&atGate(u.x)&&atGate(xc))return null;
-  const g=GATES.reduce((b,x)=>Math.abs(u.x-x)+Math.abs(x-tx)<Math.abs(u.x-b)+Math.abs(b-tx)?x:b);
-  return Math.abs(u.x-g)>2.5?[g,wz+s1*7]:[g,wz-s1*7];
+  const xc=u.x+(tx-u.x)*(wz-u.z)/(tz-u.z),near=Math.abs(u.z-wz)<6;
+  for(const g of B.gates)if(gateOpen(g,u)&&near&&Math.abs(u.x-g.x)<GATE_W/2&&Math.abs(xc-g.x)<GATE_W/2)return null; // already in the gateway
+  let best=null,bc=1e9;const cost=x=>Math.abs(u.x-x)+Math.abs(x-tx);
+  for(const g of B.gates){let c=cost(g.x);
+    if(!gateOpen(g,u)){if(B.walls>1&&!g.ram&&!B.rams)continue;c+=g.ram||B.rams?20:60+(B.walls>1?0:40);} // a shut gate: worth it only with a ram (or axes, against a palisade)
+    if(c<bc){bc=c;best=[g.x,'gate',g];}}
+  const climb=!isCav(u)&&u.kind!=='eleph'; // horses and elephants don't go up ladders
+  if(climb)for(const l of B.lad){const c=cost(l.x)+15;if(c<bc){bc=c;best=[l.x,'lad',l];}}
+  if(climb&&B.ladders>0&&u.side===B.attSide){ // plant a new ladder where the line of march meets the wall, clear of the gates
+    let x=clamp(xc,-FX+12,FX-12);for(const g of GATES)if(Math.abs(x-g)<GATE_W/2+5)x=g+Math.sign(x-g||1)*(GATE_W/2+5);
+    const c=cost(x)+15;if(c<bc){bc=c;best=[x,'new',null];}}
+  if(!best){const g=B.gates.reduce((b,g)=>cost(g.x)<cost(b.x)?g:b);best=[g.x,'gate',g];} // no way in yet: wait outside the nearest gate
+  const [x,k,o]=best;
+  if(k==='gate'&&gateOpen(o,u))return Math.abs(u.x-x)>2.5?[x,wz+s1*7,'gate',o]:[x,wz-s1*7,'gate',o];
+  return[x,wz+s1*(k==='gate'?6:4),k,o]; // the foot of the wall: batter, or climb
 }
 
 /* ================= BATTLE: UNITS ================= */
@@ -1787,20 +1880,64 @@ function mkBU(cu,side,fid){
   const T=UNITS[cu.type],L=LAYOUTS[unitSize][T.kind];
   const u={uid:cu.uid,cu,side,fid,T,kind:T.kind,L,men:cu.men,max:T.men,mor:T.mor+(cu.xp||0)*4,xp:cu.xp||0,state:'ok',
     x:0,z:0,face:homeFace(side),order:'none',dest:null,target:null,orderT:-9,running:false,runD:0,spd:0,contacts:[],prim:null,disen:false,
-    chargeT:{},ammo:T.ammo?T.ammo*2+2:0,reload:Math.random()*2,pend:0,fought:false,rallies:0,skirmT:0,home:null,figs:[],alive:[],sg:null};
+    chargeT:{},fat:0,form:null,uses:{pila:1,warcry:1,rally:2},abT:0,cry:0,pila:false,kills:0,kf:0,ammo:T.ammo?T.ammo*2+2:0,reload:Math.random()*2,pend:0,fought:false,rallies:0,skirmT:0,home:null,figs:[],alive:[],sg:null};
   const n=Math.max(1,Math.ceil(cu.men/L.per));
   for(let i=0;i<n;i++)u.figs.push({u,alive:true,fled:false,fall:0,x:0,z:0,y:0,yaw:u.face,ph:Math.random()*6.28,jx:(Math.random()-.5)*.35,jz:(Math.random()-.5)*.35,mi:0,key:null,
     sc:.94+Math.random()*.12,wp:Math.random()*6.28,wa:0,g:0,sw:-1,swk:null,wait:0,cd:Math.random()*1.5,foe:null,hit:0,kv:0,kx:0,kz:0,die:null,roll:1,air:false,ay:0,vx:0,vy:0,vz:0});
-  u.alive=u.figs.slice();u.dm=dims(u);u.wk=WEAP(u);
+  u.alive=u.figs.slice();u.dm=dims(u);u.wk=WEAP(u);u.pila=abilsOf(u).includes('pila'); // pila fly by themselves unless held back
   return u;
 }
 function mkRelief(r,side,fid){ // a relief army starts off the field, unseen, and walks on at r.delay seconds
   const u=mkBU(r.cu,side,fid);u.state='reserve';u.arr=r.delay;u.rx=r.rx;for(const f of u.figs)f.fled=true;return u;
 }
-function dims(u){const n=Math.max(1,u.alive.length),f=Math.min(u.L.files,n),r=Math.ceil(n/f);return{f,r,hw:f*u.L.sx/2,hd:Math.max(1.4,r*u.L.sz/2)};}
-const walkSp=u=>2.5+u.T.mv,runSp=u=>walkSp(u)*1.6;
-const rangeW=u=>25+u.T.rng*16+(heightAt(u.x,u.z)>4?8:0);
-const turnRate=u=>u.kind==='eleph'?.9:isCav(u)?2.2:1.5;
+function dims(u){const n=Math.max(1,u.alive.length),f=Math.min(u.form==='wedge'?Math.ceil((u.files||u.L.files)*.6):u.files||u.L.files,n),r=Math.ceil(n/f),sp=u.form==='loose'?1.5:1;return{f,r,hw:f*u.L.sx/2*sp,hd:Math.max(1.4,r*u.L.sz/2*sp)};}
+/* fatigue: running, fighting and marching in heavy formation tire men; standing still they get their breath back */
+const FAT_NAME=['Fresh','Winded','Tired','Exhausted'],FAT_P=[0,0,2,4],FAT_S=[1,1,.9,.78];
+const fatLv=u=>u.fat<25?0:u.fat<50?1:u.fat<75?2:3;
+function tire(u,dt){
+  const w=B.wx.fat*(u.kind==='gen'?.6:1);
+  if(u.contacts.length&&u.state!=='rout')u.fat+=.7*w*dt;else if(u.running||u.state==='rout')u.fat+=(isCav(u)?1.6:2.6)*w*dt;else if(u.spd>.5)u.fat+=(u.form==='testudo'?.6:u.form==='phalanx'?.35:.12)*w*dt;else u.fat-=1.6*dt; // about two minutes of hard fighting wears a fresh unit out
+  u.fat=clamp(u.fat,0,100);}
+/* abilities: one or two per unit, by the kind of troops and where they come from */
+const AB={
+  pila:{name:'Pila',ico:'➶',tip:'Heavy javelins, hurled as the enemy closes, just before the clash (once). On by default; tap to hold them back'},
+  testudo:{name:'Testudo',ico:'🛡️',form:1,tip:'Shields locked overhead: missiles do a quarter of the harm, but the men crawl and fight worse'},
+  phalanx:{name:'Phalanx',ico:'🔱',form:1,tip:'A wall of spears: far stronger from the front, slow to move and to turn'},
+  warcry:{name:'War cry',ico:'📣',tip:'Roar before the charge: +4 attack and courage for 25 s, and the enemy nearby is shaken (once)'},
+  wedge:{name:'Wedge',ico:'▼',form:1,tip:'A narrow wedge that hits harder in the charge, but is easier to hurt'},
+  loose:{name:'Loose order',ico:'⁘',form:1,tip:'Spread out: missiles do less harm, but the men are weaker in melee'},
+  rally:{name:'Rally',ico:'⚑',tip:'The general rides among the men: routing units nearby turn back (twice, a minute apart)'}};
+function abilsOf(u){const k=u.kind;
+  if(k==='gen')return['rally'];if(k==='cav')return['wedge'];if(k==='spear')return['phalanx'];if(k==='missile')return['loose'];
+  if(k==='inf')return u.T.id.startsWith('rm_')?(u.T.cls==='hinf'?['pila','testudo']:['pila']):['warcry'];
+  return[];}
+const spdMul=u=>({testudo:.45,phalanx:.6,loose:1.05}[u.form]||1)*FAT_S[fatLv(u)]*B.wx.spd;
+const canRun=u=>u.form!=='testudo'&&u.form!=='phalanx'&&fatLv(u)<3;
+const walkSp=u=>(2.5+u.T.mv)*spdMul(u),runSp=u=>canRun(u)||u.state==='rout'?walkSp(u)*1.6:walkSp(u);
+const rangeW=u=>(25+u.T.rng*16+(heightAt(u.x,u.z)>4?8:0))*B.wx.rngR;
+const turnRate=u=>(u.kind==='eleph'?.9:isCav(u)?2.2:1.5)*(u.form==='phalanx'?.5:1);
+function useAbility(u,k){ // true if it took
+  if(!active(u)||!abilsOf(u).includes(k)||B.over)return false;const A=AB[k],me=u.side===0;
+  if(A.form){u.form=u.form===k?null:k;u.dm=dims(u);if(me||u.form)flt(u,u.form?A.name.toUpperCase()+'!':A.name.toUpperCase()+' OFF',u.form?'#ffd166':'#ffffff');if(me)AU.ui('select');return true;}
+  if(B.phase!=='battle')return false;
+  if(k==='pila'){if(!(u.uses.pila>0))return false;u.pila=!u.pila;if(me)flt(u,u.pila?'PILA READY':'PILA HELD','#ffd166');return true;}
+  if(!(u.uses[k]>0)||u.abT>B.time)return false;u.uses[k]--;
+  if(k==='warcry'){u.cry=B.time+25;u.mor=Math.min(u.T.mor+u.xp*4+15,u.mor+15);u.fat=Math.min(100,u.fat+8);flt(u,'WAR CRY!','#ffd166');sndEv('rally',u);
+    for(const e of B.units)if(e.side!==u.side&&active(e)&&Math.hypot(e.x-u.x,e.z-u.z)<32){e.mor-=8;checkMor(e);}return true;}
+  if(k==='rally'){u.abT=B.time+60;flt(u,'RALLY!','#c4f2b0');sndEv('rally',u);
+    for(const o of B.units)if(o!==u&&o.side===u.side&&onField(o)&&Math.hypot(o.x-u.x,o.z-u.z)<45){
+      if(o.state==='rout'&&o.men/o.max>=.2){o.state='waver';o.mor=40;o.running=false;o.order='none';o.dest=null;o.rallies++;flt(o,'RALLIED','#c4f2b0');}
+      else if(active(o)){o.mor+=15;checkMor(o);}}return true;}
+  return false;
+}
+function pilaTarget(u){ // the men in front, close enough to throw at
+  if(u.contacts.length)return u.prim||u.contacts[0];
+  let best=null,bd=18;for(const e of B.units){if(e.side===u.side||!active(e)||e.hid||!e.sg)continue;const d=footD(u,e);if(d<bd&&flankAng(u,e)<1.2&&(u.order==='attack'?u.target===e:true)){bd=d;best=e;}}return best;}
+function throwPila(u,t){
+  u.pila=false;u.uses.pila--;const fl=.7,dmg=u.men*.2*13/(13+Math.max(1,t.T.def*.4))*rnd(.85,1.15)*(t.form==='testudo'?.4:1);
+  B.events.push({t:B.time+fl,fn:()=>{if(!onField(t))return;const m0=t.men;t.hitFrom=[u.x,u.z];hurt(t,probRound(dmg/t.T.w),7,.9,false);u.kills+=m0-t.men;t.shotT=B.time;}});
+  flt(u,'PILA!','#ffd166');if(!B.headless){spawnVolley(u,t,fl,'jav');const[v,p]=spat(u.x,u.z);AU.volley(v,p,fl,false);}
+}
 
 /* A unit's footprint is a capsule: its front line as a segment, padded by half its depth. */
 function seg(u){const d=u.dm,h=Math.max(0,d.hw-d.hd),[lx,lz]=latV(u.face);return{ax:u.x-lx*h,az:u.z-lz*h,bx:u.x+lx*h,bz:u.z+lz*h};}
@@ -1812,7 +1949,7 @@ function segSeg(a,b){ // [distance, point on a (x,z), point on b (x,z)]
   return best;
 }
 const footD=(a,b)=>segSeg(a.sg,b.sg)[0]-a.dm.hd-b.dm.hd;
-function nearFoe(u){let m=1e9;for(const e of B.units)if(e.side!==u.side&&active(e)&&e.sg)m=Math.min(m,footD(u,e));return m;}
+function nearFoe(u){let m=1e9;for(const e of B.units)if(e.side!==u.side&&active(e)&&e.sg&&!e.hid)m=Math.min(m,footD(u,e));return m;}
 function flankAng(d,a){const [fx,fz]=fwdV(d.face),dx=a.x-d.x,dz=a.z-d.z,l=Math.hypot(dx,dz)||1;return Math.acos(clamp((fx*dx+fz*dz)/l,-1,1));}
 function terrMul(u,x,z){
   let m=1;if(forestAt(x,z))m*=big(u)?.5:.75;
@@ -1823,12 +1960,12 @@ function terrMul(u,x,z){
 /* ================= BATTLE: COMBAT ================= */
 function meleeDmg(a,d){ // men-equivalents per second
   const Ta=a.T,Td=d.T,ang=flankAng(d,a),dSpear=d.kind==='spear'&&d.state!=='rout'&&ang<1.05;
-  let p=Ta.atk+a.xp;if(a.state==='waver')p-=2;
+  let p=Ta.atk+a.xp-FAT_P[fatLv(a)]+(a.cry>B.time?4:0)+(a.form==='testudo'?-4:a.form==='phalanx'&&flankAng(a,d)<1.05?2:0);if(a.state==='waver')p-=2;
   const dh=heightAt(a.x,a.z)-heightAt(d.x,d.z);if(dh>1.5)p+=2;else if(dh<-1.5)p-=1;
-  if(a.chargeT[d.uid]>0&&Ta.charge&&!dSpear)p+=Ta.charge;
+  if(a.chargeT[d.uid]>0&&Ta.charge&&!dSpear)p+=(Ta.charge+(a.form==='wedge'?4:0))*B.wx.chg; // mud takes the weight out of a charge
   if(big(a)&&dSpear)p-=2;if(a.kind==='spear'&&big(d))p+=5;if(isCav(a)&&d.kind==='missile')p+=3;if(big(a)&&forestAt(a.x,a.z))p-=3;
   p+=ang>2.3?5:ang>1.05?3:0;
-  let ar=Td.def+d.xp;if(forestAt(d.x,d.z))ar+=big(d)?-3:2;
+  let ar=Td.def+d.xp-FAT_P[fatLv(d)]+(d.form==='phalanx'&&ang<1.05?6:d.form==='testudo'?2:d.form==='wedge'||d.form==='loose'?-3:0);if(forestAt(d.x,d.z))ar+=big(d)?-3:2;
   if(d.side===B.defSide&&inTown(d))ar+=B.townBonus;if(dSpear&&big(a))ar+=5;if(d.state==='waver')ar-=1;
   ar*=ang>2.3?.6:ang>1.05?.8:1;if(d.state==='rout')ar*=.4;
   p=Math.max(1,p);ar=Math.max(1,ar);
@@ -1836,16 +1973,16 @@ function meleeDmg(a,d){ // men-equivalents per second
   return dmg;
 }
 function rangedDmg(a,d){ // men-equivalents per volley
-  const ra=a.T.ratk+a.xp+(heightAt(a.x,a.z)-heightAt(d.x,d.z)>2?2:0);
+  const ra=a.T.ratk+a.xp-(fatLv(a)>=2?1:0)+(heightAt(a.x,a.z)-heightAt(d.x,d.z)>2?2:0);
   let ar=d.T.def*.6+(forestAt(d.x,d.z)?4:0)+(d.side===B.defSide&&inTown(d)?B.townBonus:0);
   if(flankAng(d,a)>1.9)ar*=.6; // shields face forward
-  if(d.state==='rout')ar*=.5;
-  return a.men*a.T.w*.2*ra/(ra+Math.max(1,ar))*.6*(d.contacts.length?.5:1);
+  if(d.state==='rout')ar*=.5;if(d.climb||d.atGate)ar*=.6; // men on the ladders or under the gate can't shelter
+  return a.men*a.T.w*.2*ra/(ra+Math.max(1,ar))*.6*(d.contacts.length?.5:1)*B.wx.rng*({testudo:.25,loose:.6,phalanx:.85}[d.form]||1);
 }
 const hasAura=u=>B.units.some(g=>g!==u&&g.side===u.side&&g.kind==='gen'&&active(g)&&Math.hypot(g.x-u.x,g.z-u.z)<40);
 function checkMor(u){if(!active(u))return;if(u.mor<15||(u.men/u.max<.25&&u.mor<45))rout(u);else u.state=u.mor<35?'waver':'ok';}
 function rout(u){
-  u.state='rout';u.order='none';u.target=null;u.dest=null;u.running=false;flt(u,'ROUTING','#ffffff');sndEv('rout',u);
+  u.state='rout';u.order='none';u.target=null;u.dest=null;u.running=false;u.pila=false;if(u.form){u.form=null;u.dm=dims(u);}flt(u,'ROUTING','#ffffff');sndEv('rout',u);
   for(const a of B.units)if(a!==u&&a.side===u.side&&active(a)&&Math.hypot(a.x-u.x,a.z-u.z)<30){a.mor-=u.kind==='gen'?12:6;checkMor(a);}
 }
 function unitDies(u){
@@ -1881,27 +2018,33 @@ function impact(a,b){ // a runs into b
   const braced=b.kind==='spear'&&active(b)&&flankAng(b,a)<1.05;a.runD=0;
   chargeFX(a,b,braced&&big(a));
   if(braced&&big(a)){hurt(a,Math.round(a.men*.06),6,1,true);flt(b,'BRACED','#ffd166');sndCharge(b,true);return;}
-  a.chargeT[b.uid]=4;flt(a,'CHARGE!','#ffd166');sndCharge(a);
-  hurt(b,probRound(meleeDmg(a,b)*5/b.T.w),4+(a.T.charge||2)*.8+(a.kind==='eleph'?8:0),1,true);
+  a.chargeT[b.uid]=4;flt(a,'CHARGE!','#ffd166');sndCharge(a);const m0=b.men;
+  hurt(b,probRound(meleeDmg(a,b)*5/b.T.w),4+(a.T.charge||2)*.8+(a.kind==='eleph'?8:0),1,true);a.kills+=m0-b.men;
 }
 function tryFire(u,t){
   if(u.reload>0||u.ammo<=0)return;
-  u.reload=5+Math.random();u.ammo--;u.fought=true;
+  u.reload=5+Math.random();u.ammo--;u.fought=true;if(u.hid)reveal(u);
   const dmg=rangedDmg(u,t)*rnd(.8,1.2),fl=.8+Math.hypot(t.x-u.x,t.z-u.z)/55;
-  B.events.push({t:B.time+fl,fn:()=>{if(!onField(t))return;const m0=t.men;t.hitFrom=[u.x,u.z];hurt(t,probRound(dmg/t.T.w),0,.8,false);B.rLoss[t.side]+=m0-t.men;if(!B.headless){const[v,p]=spat(t.x,t.z);AU.arrowHit(v,p,clamp(Math.round(dmg/8)+2,2,6));}}});
+  B.events.push({t:B.time+fl,fn:()=>{if(!onField(t))return;const m0=t.men;t.hitFrom=[u.x,u.z];hurt(t,probRound(dmg/t.T.w),0,.8,false);B.rLoss[t.side]+=m0-t.men;u.kills+=m0-t.men;t.shotT=B.time;if(!B.headless){const[v,p]=spat(t.x,t.z);AU.arrowHit(v,p,clamp(Math.round(dmg/8)+2,2,6));}}});
   if(!B.headless){spawnVolley(u,t,fl);const[v,p]=spat(u.x,u.z);AU.volley(v,p,fl,u.T.cls==='sling');}
 }
 function fireTarget(u){
   const rg=rangeW(u);let best=null,bs=1e9;
-  for(const e of B.units){if(e.side===u.side||!onField(e))continue;const d=Math.hypot(e.x-u.x,e.z-u.z);if(d>rg)continue;
-    const sc=d+(e.state==='rout'?40:0)+(e.contacts.length?25:0);if(sc<bs){bs=sc;best=e;}}
+  for(const e of B.units){if(e.side===u.side||!onField(e)||e.hid)continue;const d=Math.hypot(e.x-u.x,e.z-u.z);if(d>rg)continue;
+    const sc=d+(e.state==='rout'?40:0)+(e.contacts.length?25:0)-(e.climb||e.atGate?30:0);if(sc<bs){bs=sc;best=e;}}
   return best;
 }
 
 /* ================= BATTLE: MOVEMENT ================= */
 function turnTo(u,a,dt,rate){const d=angDiff(u.face,a),m=rate*dt;u.face+=Math.abs(d)<=m?d:Math.sign(d)*m;return Math.abs(angDiff(u.face,a));}
 function stepToward(u,tx,tz,sp,dt,face){ // true once arrived; given a facing, the unit backs off or sidesteps while holding it
-  const wp=wallWaypoint(u,tx,tz);if(wp){tx=wp[0];tz=wp[1];}
+  const wp=wallWaypoint(u,tx,tz);
+  if(wp){tx=wp[0];tz=wp[1];
+    if(wp[2]!=='gate'||!gateOpen(wp[3],u)){const dd=Math.hypot(tx-u.x,tz-u.z),wz=WALL_Z*B.ter.ts;
+      if(wp[2]==='gate'){if(dd<4)u.atGate=wp[3];} // at a shut gate: batter it (siegeStep)
+      else if(dd<2.5){ // at the foot of the wall: up the ladders
+        if(wp[2]==='new'){if(B.ladders<=0)return false;B.ladders--;B.lad.push({x:wp[0],z:wz});if(R3.lad)ladderMesh();}
+        u.climb={t:CLIMB_T,x:wp[0],z:wz+(wz-u.z>0?7:-7)};u.spd=0;u.running=false;flt(u,'LADDERS!','#ffd166');return false;}}}
   const dx=tx-u.x,dz=tz-u.z,d=Math.hypot(dx,dz);if(d<.4){u.spd=0;return !wp;}
   let k=1;
   if(face!=null&&!wp)turnTo(u,face,dt,turnRate(u));
@@ -1923,8 +2066,12 @@ function updRout(u,dt){
 }
 function updUnit(u,dt){
   for(const k in u.chargeT)u.chargeT[k]-=dt;
-  u.reload-=dt;u.skirmT-=dt;
-  if(u.state==='rout')return updRout(u,dt);
+  u.reload-=dt;u.skirmT-=dt;u.atGate=null;tire(u,dt);
+  if(u.pila&&!u.climb&&u.state!=='rout'){const t=pilaTarget(u);if(t)throwPila(u,t);}
+  if(u.state==='rout'){u.climb=null;return updRout(u,dt);}
+  if(u.climb){ // on the ladders: they can't move or fight back until they are over, unless the enemy comes down to meet them
+    if(u.contacts.length)u.climb=null;
+    else{u.spd=0;u.running=false;if((u.climb.t-=dt)<=0){u.x=u.climb.x;u.z=u.climb.z;u.climb=null;flt(u,'OVER THE WALL!','#ffd166');sndEv('rally',u);}return;}}
   if(!u.contacts.length&&nearFoe(u)>25){u.mor=Math.min(u.T.mor+u.xp*4,u.mor+(2+(hasAura(u)?1.5:0))*dt);u.state=u.mor<35?'waver':'ok';}
   if(u.contacts.length){
     u.running=false;u.runD=0;u.fought=true;
@@ -1936,14 +2083,14 @@ function updUnit(u,dt){
     if(!u.disen){
       turnTo(u,Math.atan2(prim.x-u.x,prim.z-u.z),dt,.5);
       if(segSeg(u.sg,prim.sg)[0]-u.dm.hd-prim.dm.hd>.4){const [fx,fz]=fwdV(u.face);u.x+=fx*1.5*dt;u.z+=fz*1.5*dt;}
-      prim.pend+=meleeDmg(u,prim)*dt/prim.T.w;
+      const md=meleeDmg(u,prim)*dt/prim.T.w;prim.pend+=md;u.kf+=md; // melee kills are shared out at the end (see results)
     }
     for(const e of u.contacts)if(e.state!=='rout'){const a=flankAng(u,e);if(a>1.05)u.mor-=(a>2.3?5:2.5)*dt*(hasAura(u)?.7:1);}
     return;
   }
   u.disen=false;u.prim=null;
-  if(u.T.rng&&u.ammo>0&&u.skirmT<=0&&B.time-u.orderT>2){ // skirmishers fall back from approaching melee troops
-    const th=B.units.find(e=>e.side!==u.side&&active(e)&&!(e.T.rng&&e.ammo>0)&&e.sg&&footD(u,e)<16);
+  if(u.T.rng&&u.ammo>0&&u.skirmT<=0&&B.time-u.orderT>2&&!u.hid){ // skirmishers fall back from approaching melee troops
+    const th=B.units.find(e=>e.side!==u.side&&active(e)&&!e.hid&&!(e.T.rng&&e.ammo>0)&&e.sg&&footD(u,e)<16);
     if(th){const dx=u.x-th.x,dz=u.z-th.z,l=Math.hypot(dx,dz)||1,tx=clamp(u.x+dx/l*26,-FX+10,FX-10),tz=clamp(u.z+dz/l*26,-FZ+8,FZ-8);
       if(Math.hypot(tx-u.x,tz-u.z)>10){u.order='move';u.target=null;u.dest={x:tx,z:tz,face:Math.atan2(-dx,-dz)};u.skirmT=4;}}
   }
@@ -1956,7 +2103,7 @@ function updUnit(u,dt){
       else{u.spd=0;if(turnTo(u,Math.atan2(t.x-u.x,t.z-u.z),dt,turnRate(u))<.5)tryFire(u,t);}
       return;
     }else{
-      u.running=footD(u,t)<30;stepToward(u,t.x,t.z,u.running?runSp(u):walkSp(u),dt);
+      u.running=footD(u,t)<30&&canRun(u);stepToward(u,t.x,t.z,u.running?runSp(u):walkSp(u),dt);
       if(u.running)u.runD+=u.spd*dt;else u.runD=0;
       return;
     }
@@ -1964,7 +2111,7 @@ function updUnit(u,dt){
   u.running=false;u.runD=0;
   if(u.order==='move'&&u.dest){const bk=u.dest.back;if(!stepToward(u,u.dest.x,u.dest.z,walkSp(u)*(bk||1),dt,bk?u.dest.face:null))return;u.order='none';}
   u.spd=0;
-  const t=u.T.rng&&u.ammo>0?fireTarget(u):null; // fire at will
+  const t=u.T.rng&&u.ammo>0&&!u.hid?fireTarget(u):null; // fire at will (men lying in ambush hold their fire)
   if(t&&Math.abs(angDiff(u.face,Math.atan2(t.x-u.x,t.z-u.z)))<1.2){if(turnTo(u,Math.atan2(t.x-u.x,t.z-u.z),dt,1)<.5)tryFire(u,t);}
   else if(u.dest&&u.dest.face!=null)turnTo(u,u.dest.face,dt,turnRate(u));
 }
@@ -2006,41 +2153,101 @@ function bestTarget(u,foes){
     if(sc>bs){bs=sc;best=f;}}
   return best;
 }
+/* each people fights its own way: aggr makes a defender come out sooner, flank is the share of its horse that rides round the enemy's wings,
+   line: the foot keep together, reserve: one strong unit is held back, shoot: missiles soften the enemy before the foot close, phal: spearmen form a phalanx, cry: war cries */
+const PERS={
+  rome:{nm:'Disciplined',aggr:1,flank:.5,line:1,reserve:1,phal:1,txt:'they keep their line, and a reserve behind it'},
+  etruria:{nm:'Cautious',aggr:.85,flank:.4,line:1,shoot:1,phal:1,txt:'they soften you up with missiles before they close'},
+  samnium:{nm:'Skirmishing',aggr:1.1,flank:.7,line:1,shoot:1,cry:1,txt:'they harry you with javelins, and their horse rides round your flanks'},
+  gauls:{nm:'Reckless',aggr:1.5,flank:.5,line:0,cry:1,txt:'they charge headlong, every warband for itself'},
+  greeks:{nm:'Steady',aggr:.8,flank:.3,line:1,phal:1,shoot:1,txt:'they hold a wall of spears and let you come to them'},
+  carthage:{nm:'Cunning',aggr:1,flank:1,line:1,phal:1,txt:'they send their horse round your flanks to strike from behind'},
+  rebels:{nm:'Timid',aggr:.7,flank:.2,line:1,txt:'they give way easily'}};
+function flankTarget(u,af){ // for horsemen: whoever they can hit from the side or behind, above all men already locked in melee, and missile troops
+  let best=null,bs=-1e9;
+  for(const f of af){const a=flankAng(f,u),sc=-footD(u,f)*.5+(f.contacts.length?30:0)+(a>2.2?28:a>1.2?14:0)+(f.kind==='missile'?18:0)-(f.kind==='spear'&&!f.contacts.length&&a<1.2?40:0)+(u.target===f?8:0);
+    if(sc>bs){bs=sc;best=f;}}
+  return best;
+}
+function aiAbil(u,af,P){ // when the AI uses its units' abilities
+  const ab=abilsOf(u);if(!ab.length)return;
+  const shot=u.shotT>B.time-5,close=af.some(e=>!(e.T.rng&&e.ammo>0)&&footD(u,e)<30),tog=(k,want)=>{if(want!==(u.form===k))useAbility(u,k);};
+  if(ab.includes('testudo'))tog('testudo',shot&&!close&&!u.contacts.length);
+  if(ab.includes('loose'))tog('loose',shot&&!close);
+  if(ab.includes('phalanx')&&P.phal){const near=af.some(e=>footD(u,e)<40&&flankAng(u,e)<1.3),far=(u.order==='attack'&&u.target&&footD(u,u.target)>40)||(u.order==='move'&&u.dest&&Math.hypot(u.dest.x-u.x,u.dest.z-u.z)>15);
+    tog('phalanx',(near||u.contacts.length>0)&&!far);}
+  if(ab.includes('wedge'))tog('wedge',u.order==='attack'&&!!u.target&&!u.contacts.length&&footD(u,u.target)<50&&!(u.target.kind==='spear'&&flankAng(u.target,u)<1.2));
+  if(ab.includes('warcry')&&u.uses.warcry>0&&u.target&&!u.contacts.length&&footD(u,u.target)<22){if(u.cryOk==null)u.cryOk=!!P.cry||Math.random()<.5;if(u.cryOk)useAbility(u,'warcry');}
+  if(ab.includes('rally')&&u.uses.rally>0&&u.abT<=B.time&&B.units.some(o=>o.side===u.side&&o.state==='rout'&&o.men/o.max>=.2&&Math.hypot(o.x-u.x,o.z-u.z)<45))useAbility(u,'rally');
+}
 function aiAtk(u,t){if(u.order!=='attack'||u.target!==t){u.order='attack';u.target=t;u.orderT=B.time;}}
 function aiMove(u,x,z,face){u.order='move';u.target=null;u.dest=openDest({x:clamp(x,-FX+10,FX-10),z:clamp(z,-FZ+6,FZ-6),face:face??homeFace(u.side)});}
 function aiHold(u){if(u.order!=='none'){u.order='none';u.target=null;u.dest={x:u.x,z:u.z,face:homeFace(u.side)};}}
 function aiHome(u){if(Math.hypot(u.home.x-u.x,u.home.z-u.z)>6)aiMove(u,u.home.x,u.home.z);else aiHold(u);}
 function aiThink(s){
-  const mine=B.units.filter(u=>u.side===s&&active(u)),foes=B.units.filter(u=>u.side!==s&&onField(u)),af=foes.filter(active);
-  if(!mine.length||!af.length)return;
+  const PS=B.pers[s],sg=B.wx.sight,mine=B.units.filter(u=>u.side===s&&active(u));
+  let foes=B.units.filter(u=>u.side!==s&&onField(u)&&!u.hid);
+  if(!mine.length||(B.amb===s&&!B.sprung))return; // lying in wait
+  if(sg&&foes.length){const v=foes.filter(e=>mine.some(m=>Math.hypot(m.x-e.x,m.z-e.z)<sg+m.dm.hw+e.dm.hw)); // in fog it fights only what it can see
+    if(!v.length){if(s===B.attSide&&B.amb==null)for(const u of mine)if(u.order==='none'&&!u.contacts.length&&!u.res)aiMove(u,u.x,u.z+towardZ(s)*25,homeFace(s));return;} // feeling its way forward
+    foes=v;}
+  const af=foes.filter(active);
+  if(B.resSet==null)B.resSet=[0,0];
+  if(PS.reserve&&!B.resSet[s]&&B.phase==='battle'){B.resSet[s]=1;const c=mine.filter(u=>u.kind==='spear'||u.T.cls==='hinf').sort((a,b)=>b.T.def-a.T.def)[0];if(c&&mine.length>4)c.res=true;} // the triarii wait behind the line
+  for(const u of mine)if(u.flk===undefined)u.flk=u.kind==='cav'&&(B.field||!B.walls)&&Math.random()<PS.flank?{}:null; // horse that will ride round the wings
+  if(!af.length){ // nobody in sight: a column on the march keeps to the road
+    if(B.amb!=null&&s===B.attSide){const ts=B.ter.ts;for(const u of mine)if(u.order==='none'&&!u.contacts.length){const zl=clamp(u.z*ts+45,-FZ+12,FZ-12);aiMove(u,roadX(zl),zl*ts,Math.atan2(roadX(zl+1)-roadX(zl-1),2*ts));}}
+    return;}
+  const P=B.plaza,pz=P&&B.phase==='battle'?{x:0,z:P.z}:null;
   const fz=towardZ(s),ec=centroid(af),oc=centroid(mine);
   const pw=us=>us.reduce((a,u)=>a+u.men*u.T.w*(u.T.atk+u.T.def+u.T.ratk*.6+u.xp*2+u.T.charge*.3)*(.6+u.mor/200),0);
   // attackers advance; defenders hold their ground unless clearly stronger or being shot to pieces
-  const aggr=s===B.attSide||pw(mine)>pw(af)*1.35||B.rLoss[s]>B.init[s]*.12;
+  const wl=s===B.defSide&&B.gates&&B.gates.length>0; // behind walls: they come out only to crush a much weaker enemy
+  const aggr=s===B.attSide||(wl?pw(mine)>pw(af)*2.2:pw(mine)>pw(af)*1.35/PS.aggr||B.rLoss[s]>B.init[s]*.12)||(B.amb===s&&B.sprung);
+  const soften=PS.shoot&&aggr&&B.time<50&&!B.units.some(u=>u.contacts.length)&&mine.some(m=>m.T.rng&&m.ammo>0); // the foot wait while the missiles do their work
   const line=mine.filter(u=>!isCav(u)&&!(u.T.rng&&u.ammo>0)&&u.kind!=='gen');
   const lineP=line.length?Math.min(...line.map(u=>u.z*fz)):null;
-  const anyEng=B.units.some(u=>u.contacts.length);
+  const anyEng=B.units.some(u=>u.contacts.length),walled=s===B.defSide&&B.gates&&B.gates.length>0,plug=new Map();
+  if(walled){const wz=WALL_Z*B.ter.ts;for(const g of B.gates)if(g.open){ // a broken gate: the nearest free foot stand in the gateway
+    const c=mine.filter(m=>!m.T.rng&&!isCav(m)&&m.kind!=='gen'&&!m.contacts.length&&!plug.has(m)).sort((a,b)=>Math.hypot(a.x-g.x,a.z-wz)-Math.hypot(b.x-g.x,b.z-wz))[0];if(c)plug.set(c,g);}}
   for(const u of mine){
+    aiAbil(u,af,PS);
     if(u.skirmT>0)continue;
-    if(u.contacts.length){if(!u.contacts.includes(u.target)){u.target=u.prim||u.contacts[0];u.order='attack';}continue;}
+    if(u.contacts.length){u.res=false;if(!u.contacts.includes(u.target)){u.target=u.prim||u.contacts[0];u.order='attack';}continue;}
     if(u.T.rng&&u.ammo>0){
-      let t=null,td=1e9;for(const f of af){const d=Math.hypot(f.x-u.x,f.z-u.z);if(d<td){td=d;t=f;}}
-      if(td<=rangeW(u)||(aggr&&(lineP===null||u.z*fz<lineP+2)))aiAtk(u,t);
+      let t=null,td=1e9,tsc=1e9;for(const f of af){const d=Math.hypot(f.x-u.x,f.z-u.z),sc=d-(f.climb||f.atGate?30:0);if(sc<tsc){tsc=sc;td=d;t=f;}}
+      if(walled&&!inTown(t)){if(td<=rangeW(u))aiAtk(u,t);else aiHome(u);continue;} // on the walls: shoot from them, never march out
+      if(td<=rangeW(u)||(aggr&&(lineP===null||u.z*fz<lineP+(PS.shoot?30:2))))aiAtk(u,t);
       else if(aggr)aiHold(u);else aiHome(u);
       continue;}
-    const t=bestTarget(u,foes),d=t?footD(u,t):1e9;
+    const t=bestTarget(u,wl&&!aggr&&!u.T.rng?foes.filter(inTown):foes),d=t?footD(u,t):1e9; // holding the walls: only the enemy who gets inside is fought
     if(u.kind==='gen'){
       if(t&&d<20&&(t.state!=='ok'||t.contacts.length))aiAtk(u,t);
       else{const o=mine.filter(x=>x!==u&&x.kind!=='gen');if(o.length){const c=centroid(o);aiMove(u,c.x,c.z-fz*22);}}
       continue;}
-    if(!t)continue;
+    const pg=plug.get(u);if(!t&&wl){if(pg)aiMove(u,pg.x,(WALL_Z+8)*B.ter.ts,homeFace(s));else aiHome(u);continue;}
+    if(!t)continue;if(pg&&d>14){aiMove(u,pg.x,(WALL_Z+8)*B.ter.ts,homeFace(s));continue;} // hold the gateway
+    if(u.res){ // the reserve goes in when the line wavers, a unit breaks, the enemy comes close, or after a minute and a half
+      if(B.time>90||d<25||mine.some(m=>m.state==='rout'||(m.state==='waver'&&m.contacts.length)))u.res=false;else{aiHome(u);continue;}}
+    if(pz&&s===B.defSide&&(P.st==='att'||P.st==='cont')&&!u.T.rng&&d>12){ // the square is being taken: retake it
+      const e=af.filter(e=>Math.abs(e.x)<P.hw+6&&Math.abs(e.z-P.z)<P.hd+6).sort((a,b)=>footD(u,a)-footD(u,b))[0];if(e){aiAtk(u,e);continue;}}
+    if(pz&&s===B.attSide&&inTown(u)&&d>30&&!isCav(u)){aiMove(u,clamp(u.x*.5,-P.hw+6,P.hw-6),P.z,homeFace(s));continue;} // through the walls: make for the square
     if(aggr){
+      if(u.flk){ // ride out past the end of their line, then turn in on a flank or the rear
+        if(!u.flk.go){const xs=af.map(e=>e.x),sd=u.flk.sd||(u.flk.sd=u.x>=ec.x?1:-1),wx=clamp(sd>0?Math.max(...xs)+32:Math.min(...xs)-32,-FX+10,FX-10),wz=clamp(ec.z+fz*8,-FZ+8,FZ-8);
+          u.flk.t0=u.flk.t0||B.time;
+          if(Math.hypot(wx-u.x,wz-u.z)<14||B.time-u.flk.t0>45||d<10)u.flk.go=true;else{aiMove(u,wx,wz,homeFace(s));continue;}}
+        const ft=flankTarget(u,af);if(ft){aiAtk(u,ft);continue;}}
       if(isCav(u)&&!anyEng&&d>40&&lineP!==null){aiMove(u,u.home.x,(lineP-4)*fz);continue;}
+      if(!PS.line&&!isCav(u)&&!soften){aiAtk(u,t);continue;} // every warband for itself
+      if(soften&&!isCav(u)&&u.kind!=='eleph'){if(d>70&&u.z*fz<=lineP+6)aiMove(u,u.x,u.z+fz*20);else aiHold(u);continue;}
+      if(isCav(u)&&anyEng){const ft=flankTarget(u,af);if(ft){aiAtk(u,ft);continue;}}
       if(d<45||isCav(u)||lineP===null){aiAtk(u,t);continue;}
       if(u.z*fz>lineP+6){aiHold(u);continue;}
       aiMove(u,u.x+(ec.x-oc.x)*.12,u.z+fz*30);
     }else{
-      if(d<35)aiAtk(u,t);
+      if(isCav(u)&&anyEng){const ft=flankTarget(u,af);if(ft&&footD(u,ft)<90){aiAtk(u,ft);continue;}} // with the lines locked, the horse falls on their flanks
+      if(d<(PS.line?35:60))aiAtk(u,t);
       else if(u.order==='attack'&&d>55)aiHome(u);
       else if(u.order==='none')aiHome(u);
     }
@@ -2072,19 +2279,59 @@ function simStep(dt){
   for(const s of [0,1])if(s===1||B.auto){B.aiT[s]-=dt;if(B.aiT[s]<=0){B.aiT[s]=.5;aiThink(s);}}
   for(const u of B.units)if(onField(u))updUnit(u,dt);
   for(const u of B.units)if(onField(u)&&u.pend>=1){const l=Math.floor(u.pend);u.pend-=l;hurt(u,l,0,1,true);}
+  siegeStep(dt);plazaStep(dt);ambushStep();
   separate();
   if(B.events.length)B.events=B.events.filter(e=>{if(e.t<=B.time){e.fn();return false;}return true;});
   checkOver();
+}
+function siegeStep(dt){ // rams and axes at the shut gates; the gate towers shoot down at whoever is under them
+  const wz=WALL_Z*B.ter.ts;
+  for(const g of B.gates){if(g.open){g.bat=null;continue;}
+    const bs=B.units.filter(u=>u.atGate===g&&active(u)&&!u.contacts.length);g.bat=bs[0]||null;if(!bs.length)continue;
+    if(!g.ram&&B.rams>0){B.rams--;g.ram=true;flt(bs[0],'RAM!','#ffd166');}
+    const rate=g.ram?B.ramK/RAM_T[B.walls]:B.walls===1?Math.min(1,sumMen(bs)/120)/HACK_T:0;
+    if(!rate){if(!g.warn){g.warn=1;flt(bs[0],'NEED A RAM','#ffb3a6');}continue;}
+    g.hp-=rate*dt;
+    for(const u of bs)if(TOWER_FIRE[B.walls]&&B.units.some(d=>d.side===B.defSide&&active(d)&&Math.abs(d.z-wz)<30)){const m0=u.men;hurt(u,probRound(TOWER_FIRE[B.walls]*dt/bs.length),0,.6);B.rLoss[u.side]+=m0-u.men;B.unk[u.side]+=m0-u.men;} // only while the walls are manned
+    if(!B.headless&&g.ram&&(g.thud=(g.thud||0)-dt)<=0){g.thud=1.6;const[v,p]=spat(g.x,wz);AU.brace(v,p);if(R3.dust)fxDust(g.x+rnd(-3,3),wz+rnd(-2,2)*B.ter.ts,false);}
+    if(g.hp<=0){g.hp=0;g.open=true;g.bat=null;
+      const a=B.attSide===0;if(!B.headless&&R3.scene){banner(a?'The gate is broken — into the town!':'They have broken a gate!');const k=B.annK=(B.annK||0)+1;B.events.push({t:B.time+4,fn:()=>{if(B&&!B.over&&B.annK===k)banner(false);}});
+        for(let i=0;i<14;i++)fxDust(g.x+rnd(-GATE_W/2,GATE_W/2),wz+rnd(-3,3),true);R3.shake=Math.max(R3.shake,.7*spat(g.x,wz)[0]);const[v,p]=spat(g.x,wz);AU.charge('eleph',v,p);AU.ui(a?'fanfare':'alarm');}
+      for(const d of B.units)if(d.side===B.defSide&&active(d)&&Math.hypot(d.x-g.x,d.z-wz)<45){d.mor-=8;checkMor(d);}}}
+}
+function plazaStep(dt){ // the town square: attackers who hold it alone for PLAZA_T seconds take the town
+  const P=B.plaza;if(!P||B.phase!=='battle')return;
+  const inP=u=>active(u)&&Math.abs(u.x)<P.hw&&Math.abs(u.z-P.z)<P.hd;
+  const a=B.units.some(u=>u.side===B.attSide&&inP(u)),d=B.units.some(u=>u.side===B.defSide&&inP(u)),st=a&&!d?'att':a?'cont':d?'def':'none';
+  if(st!==P.st){P.st=st;
+    if(st==='att'&&!B.headless){banner(B.attSide===0?'Your men hold the town square — keep it!':'The enemy holds the town square — drive them out!');const k=B.annK=(B.annK||0)+1;B.events.push({t:B.time+4,fn:()=>{if(B&&!B.over&&B.annK===k)banner(false);}});AU.ui(B.attSide===0?'select':'alarm');}}
+  if(st==='att')P.t+=dt;else if(!a)P.t=Math.max(0,P.t-dt*.5);
+  if(P.t>=PLAZA_T)endBattle(B.attSide,'plaza');
+}
+const plazaTxt=()=>{const P=B.plaza;if(!P||B.phase!=='battle'||(!P.t&&P.st!=='att'))return'';return` · ⚑ Square ${Math.floor(P.t)}/${PLAZA_T}s${P.st==='cont'?' (contested)':''}`;};
+function reveal(u){ // an ambusher shows himself; the first to do so springs the whole trap
+  if(!u.hid)return;u.hid=false;if(u.lab)u.lab.classList.remove('hid');
+  if(B.sprung)return;B.sprung=true;
+  for(const a of B.units)if(a.side===B.amb&&a.hid&&B.amb===1)reveal(a); // the enemy's ambush is sprung all at once
+  for(const v of B.units)if(v.side!==B.amb&&active(v)){v.mor-=v.kind==='gen'?10:18;if(v.side===1){v.files=null;v.dm=dims(v);}flt(v,'AMBUSHED!','#ffb3a6');checkMor(v);} // the enemy's column shakes out into line
+  if(!B.headless&&R3.scene){banner(B.amb===0?'Your ambush is sprung!':'Ambush! The enemy springs from both sides of the road!');const k=B.annK=(B.annK||0)+1;B.events.push({t:B.time+5,fn:()=>{if(B&&!B.over&&B.annK===k)banner(false);}});AU.ui(B.amb===0?'fanfare':'alarm');AU.war();}
+}
+function ambushStep(){ // hidden men are found when the enemy stumbles on them, or show themselves when they strike
+  if(B.amb==null||B.phase!=='battle')return;
+  for(const u of B.units){if(!u.hid||!onField(u))continue;
+    const r=20,near=B.units.some(e=>e.side!==u.side&&active(e)&&Math.hypot(e.x-u.x,e.z-u.z)<r+e.dm.hw);
+    if(near||u.contacts.length||(u.order==='attack'&&u.target)||(B.amb===1&&B.time>=B.springT))reveal(u);}
 }
 function checkOver(){
   if(!B||B.over)return true;
   for(const s of [0,1])if(!B.units.some(u=>u.side===s&&active(u))){const rs=B.units.filter(u=>u.side===s&&u.state==='reserve');if(rs.length)arrive(rs);} // the line has broken: any relief still on the road hurries in rather than the battle ending without it
   const a0=B.units.some(u=>u.side===0&&active(u)),a1=B.units.some(u=>u.side===1&&active(u));
   if(!a0||!a1){endBattle(!a0&&!a1?B.defSide:a0?0:1,'rout');return true;}
-  if(B.time>=BATTLE_TIME){endBattle(B.defSide,'time');return true;}
+  if(B.time>=B.tmax){endBattle(B.defSide,'time');return true;}
   return false;
 }
 function zoneOf(s){
+  if(B.amb===s)return{x0:-FX+8,x1:FX-8,z0:-FZ+12,z1:FZ-12,front:0};
   const sg=s===0?1:-1,[a,b]=B.field?[48,FZ-8]:s===B.defSide?[WALL_Z+3,TOWN_Z-3]:[WALL_Z+6,FZ-6];
   return{x0:-FX+8,x1:FX-8,z0:Math.min(a*sg,b*sg),z1:Math.max(a*sg,b*sg),front:a};
 }
@@ -2093,7 +2340,8 @@ function autoDeploy(s){
   us.filter(u=>['inf','spear','eleph'].includes(u.kind)).sort((a,b)=>b.T.def-a.T.def).forEach((u,i)=>i%2?row0.push(u):row0.unshift(u));
   us.filter(u=>u.kind==='cav').forEach((u,i)=>i%2?row0.push(u):row0.unshift(u));
   const rows=[],maxW=Z.x1-Z.x0;
-  for(const r of [row0,us.filter(u=>u.kind==='missile'),us.filter(u=>u.kind==='gen')]){let cur=[],w=0;
+  const mis=us.filter(u=>u.kind==='missile'),onWalls=B.gates&&B.gates.length&&s===B.defSide; // behind walls, the archers and slingers man them
+  for(const r of onWalls?[mis,row0,us.filter(u=>u.kind==='gen')]:[row0,mis,us.filter(u=>u.kind==='gen')]){let cur=[],w=0;
     for(const u of r){const uw=u.dm.hw*2+4;if(w+uw>maxW&&cur.length){rows.push(cur);cur=[];w=0;}cur.push(u);w+=uw;}if(cur.length)rows.push(cur);}
   let z=Z.front;
   for(const r of rows){const hd=Math.max(...r.map(u=>u.dm.hd));z+=hd;let x=-r.reduce((a,u)=>a+u.dm.hw*2+4,0)/2;
@@ -2106,7 +2354,7 @@ function autoDeploy(s){
 const selUnits=()=>[...B.sel].map(unitById).filter(u=>u&&active(u));
 function threatFace(x,z,side,fb){ // the way to face from (x,z): toward the enemy army, nearer units weighing more
   let sx=0,sz=0;
-  for(const e of B.units){if(e.side===side||!onField(e)||e.state==='rout')continue;
+  for(const e of B.units){if(e.side===side||!onField(e)||e.state==='rout'||e.hid)continue;
     const dx=e.x-x,dz=e.z-z,d=Math.hypot(dx,dz)||1,w=e.men/Math.max(d,20)**1.5/d;sx+=dx*w;sz+=dz*w;}
   return sx||sz?Math.atan2(sx,sz):fb;
 }
@@ -2125,10 +2373,34 @@ function orderAttack(sel,e){AU.ui('attack');for(const u of sel){u.order='attack'
 function orderHalt(sel){for(const u of sel){u.order='none';u.target=null;u.dest={x:u.x,z:u.z,face:threatFace(u.x,u.z,u.side,u.face)};u.orderT=B.time;}} // stop and turn to face them
 function deployMove(sel,pt){
   AU.ui('move');
-  const Z=zoneOf(0),c=centroid(sel),inZ=u=>{u.x=clamp(u.x,Z.x0,Z.x1);u.z=clamp(u.z,Z.z0+u.dm.hd,Z.z1-u.dm.hd);};
-  for(const u of sel){u.x=pt.x+(u.x-c.x);u.z=pt.z+(u.z-c.z);inZ(u);}
+  const c=centroid(sel);
+  for(const u of sel){u.x=pt.x+(u.x-c.x);u.z=pt.z+(u.z-c.z);}
+  deploySettle();
+}
+function deploySettle(){ // keep everyone inside the deployment zone and clear of each other
+  const Z=zoneOf(0),inZ=u=>{u.x=clamp(u.x,Z.x0,Z.x1);u.z=clamp(u.z,Z.z0+u.dm.hd,Z.z1-u.dm.hd);ambClamp(u);};
+  B.units.filter(u=>u.side===0).forEach(inZ);
   for(let i=0;i<8;i++){for(const u of B.units)u.contacts=[];separate();B.units.filter(u=>u.side===0).forEach(inZ);}
   for(const u of B.units)if(u.side===0){u.home={x:u.x,z:u.z};u.sg=seg(u);}
+}
+/* drawing a line: hold the ground, then drag. The selected units share the line by their width, keep their order from left to right, and face away from it toward the enemy */
+function lineSlots(sel,a,b){ // [[unit, x, z, facing, files]], or null for a line too short to mean anything
+  let dx=b.x-a.x,dz=b.z-a.z;const L=Math.hypot(dx,dz);if(!sel.length||L<4)return null;dx/=L;dz/=L;
+  let f=Math.atan2(-dz,dx);const th=threatFace((a.x+b.x)/2,(a.z+b.z)/2,0,f);if(Math.cos(angDiff(f,th))<0)f+=Math.PI; // of the two ways to face, the one toward the enemy
+  const [lx,lz]=latV(f),[fx,fz]=fwdV(f),s0=lx*dx+lz*dz>0?a:b,gap=2;
+  const us=sel.slice().sort((p,q)=>(p.x*lx+p.z*lz)-(q.x*lx+q.z*lz)),nat=us.map(u=>Math.max(1,u.alive.length)*u.L.sx),tot=nat.reduce((x,y)=>x+y,0),avail=Math.max(us.length,L-gap*(us.length-1));
+  let at=0;return us.map((u,i)=>{const n=Math.max(1,u.alive.length),w=avail*nat[i]/tot,fi=clamp(Math.round(w/u.L.sx),Math.min(n,3),n),hd=Math.max(1.4,Math.ceil(n/fi)*u.L.sz/2),m=at+w/2;at+=w+gap;
+    return[u,s0.x+lx*m-fx*hd,s0.z+lz*m-fz*hd,f,fi];}); // the front rank stands on the line
+}
+function orderLine(sel,a,b){
+  const sl=lineSlots(sel,a,b);if(!sl)return false;AU.ui('move');
+  for(const [u,x,z,f,fi] of sl){u.files=fi;u.dm=dims(u);
+    if(B.phase==='deploy'){u.x=x;u.z=z;u.face=f;continue;}
+    u.order='move';u.target=null;u.orderT=B.time;u.skirmT=0;
+    const d=u.dest=openDest({x:clamp(x,-FX+6,FX-6),z:clamp(z,-FZ+4,FZ-4),face:f}),off=Math.abs(angDiff(f,Math.atan2(d.x-u.x,d.z-u.z)));
+    if(Math.hypot(d.x-u.x,d.z-u.z)<35&&off>1.1)d.back=off>2?.55:.75;}
+  if(B.phase==='deploy')deploySettle();
+  return true;
 }
 
 /* ================= BATTLE: MODELS ================= */
@@ -2305,6 +2577,13 @@ const ATMOS={
   fog:{name:'Fog',ico:'🌫️',w:[.6,1.4],sun:0xf2eee4,si:.85,dir:[-.4,.8,.4],sky:0xe8eaea,gnd:0x6e6858,hi:1.65,zen:0xc6ccd0,hor:0xc8cdcf,glow:.25,cloud:.6,fog:.0062,exp:1,rain:0}
 };
 const ATMO_KEYS=Object.keys(ATMOS);
+const WX={ // rng: missile hits, rngR: missile range, chg: the charge bonus, spd: marching, fat: how fast men tire, sight: how far off the enemy can be made out (0: no limit)
+  dawn:{rngR:.9,sight:130,txt:'Low sun: missiles carry a little shorter.'},dusk:{rngR:.9,sight:130,txt:'Fading light: missiles carry a little shorter, and the enemy is hard to make out far off.'},
+  rain:{rng:.65,rngR:.8,chg:.7,spd:.92,fat:1.35,sight:140,txt:'Rain: bowstrings and slings go slack (missiles hit 35% less and carry 20% shorter), charges bog down in the mud, and men tire faster.'},
+  fog:{rngR:.75,sight:55,txt:'Fog: the enemy can only be made out up close (their standards vanish further off), and missiles carry 25% shorter.'}};
+function wxOf(k){const w=Object.assign({rng:1,rngR:1,chg:1,spd:1,fat:1,sight:0,txt:''},WX[k]||{});
+  if(k==='day'&&!(G&&G.turn%2===0)){w.fat=1.25;w.txt='Summer heat: men tire faster.';} // a clear sky in summer
+  return w;}
 function pickAtmo(){const w=G&&G.turn%2===0?1:0;let r=Math.random()*ATMO_KEYS.reduce((a,k)=>a+ATMOS[k].w[w],0);for(const k of ATMO_KEYS)if((r-=ATMOS[k].w[w])<0)return k;return'day';}
 const GL_NOISE=`float hs(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hs(i),hs(i+vec2(1.,0.)),f.x),mix(hs(i+vec2(0.,1.)),hs(i+1.),f.x),f.y);}`;
@@ -2580,6 +2859,34 @@ function buildWalls(scene){
       for(const s of [-1,1])ins.push([g+s*(GATE_W/2-.6),h,zw,0,1.2,1,3,dk]);}
     placeInstances(scene,box,lamb(),ins,true);placeInstances(scene,box.clone(),lamb(),mer,true);placeInstances(scene,hipGeo(),lamb(),caps,true);
   }
+  buildSiege(scene);
+}
+function buildSiege(scene){ // the gates' doors, a ram for each gate (shown once one is brought up), and the ladders
+  const T=THREE,ts=B.ter.ts,zw=WALL_Z*ts,out=-ts,lv=B.walls,H=lv===1?3.4:WALL_H[lv],ry=ts===1?0:Math.PI;
+  const doorG=mergeParts([prt(bx(GATE_W-.4,H,.5),0x6b4a2b,{y:H/2}),...[-.32,0,.32].map(k=>prt(bx(.3,H,.62),0x4f3620,{x:k*GATE_W,y:H/2})),prt(bx(GATE_W-.4,.35,.62),0x3b3b3b,{y:H*.3}),prt(bx(GATE_W-.4,.35,.62),0x3b3b3b,{y:H*.75})]);
+  const shed=mergeParts([...[[-1.5,-3],[1.5,-3],[-1.5,3],[1.5,3]].map(([x,z])=>prt(bx(.3,2.6,.3),0x5a3d22,{x,y:1.3,z})),prt(prismGeo(),0x7a6a48,{y:2.6,ry:Math.PI/2,sx:7.4,sy:1.5,sz:4}),
+    ...[[-1.7,-2.2],[1.7,-2.2],[-1.7,2.2],[1.7,2.2]].map(([x,z])=>prt(cy(.6,.6,.25,8),0x4a3322,{x,y:.6,z,rz:Math.PI/2}))]);
+  const logG=mergeParts([prt(cy(.38,.38,7.6,7),0x6b4a2b,{y:1.5,rx:Math.PI/2}),prt(cn(.5,.8,7),0x8c8f94,{y:1.5,z:4.1,rx:Math.PI/2})]);
+  R3.siege={gates:B.gates.map(g=>{
+    const door=new T.Mesh(doorG,lamb({vertexColors:true}));door.position.set(g.x,.1,zw);door.rotation.y=ry;door.castShadow=door.receiveShadow=true;scene.add(door);
+    const ram=new T.Group(),sh=new T.Mesh(shed,lamb({vertexColors:true})),log=new T.Mesh(logG,lamb({vertexColors:true}));sh.castShadow=log.castShadow=true;ram.add(sh,log);
+    ram.position.set(g.x,heightAt(g.x,zw+out*6),zw+out*6);ram.rotation.y=ry;ram.visible=false;scene.add(ram); // the log points at the gate (+z toward the town when ts is 1)
+    return{door,ram,log,H};})};
+  const lg=mergeParts([prt(bx(.18,1,.18),0x7a5a38,{x:-.55,y:.5}),prt(bx(.18,1,.18),0x7a5a38,{x:.55,y:.5}),...[.1,.3,.5,.7,.9].map(y=>prt(bx(1.1,.07,.1),0x8a6a48,{y}))]);
+  R3.lad=new T.InstancedMesh(lg,lamb({vertexColors:true}),24);R3.lad.count=0;R3.lad.castShadow=true;R3.lad.frustumCulled=false;scene.add(R3.lad);
+}
+function ladderMesh(){ // three ladders at each spot, leaning on the wall from outside
+  const ts=B.ter.ts,zw=WALL_Z*ts,out=-ts,H=WALL_H[B.walls]+1.2,L=Math.hypot(H,2.2),tilt=Math.atan2(2.2,H);let i=0;
+  for(const l of B.lad)for(const o of [-3,0,3]){if(i>=24)break;_e.set(ts*tilt,0,0);_q.setFromEuler(_e);_p.set(l.x+o,heightAt(l.x+o,zw+out*2.2),zw+out*2.2);_s.set(1,L,1);_M.compose(_p,_q,_s);R3.lad.setMatrixAt(i++,_M);}
+  R3.lad.count=i;R3.lad.instanceMatrix.needsUpdate=true;
+}
+function updSiegeFX(vdt){ // doors swing up for the defenders and lie broken once rammed; rams swing
+  if(!R3.siege)return;const zw=WALL_Z*B.ter.ts,t=R3.clk;
+  B.gates.forEach((g,i)=>{const S=R3.siege.gates[i],d=S.door;
+    if(g.open){if(!g.fell){g.fell=1;d.rotation.x=(B.ter.ts===1?1:-1)*Math.PI/2*.94;d.position.y=.35;}} // the doors fall in
+    else{const near=(s,r)=>B.units.some(u=>u.side===s&&onField(u)&&Math.abs(u.x-g.x)<GATE_W/2+r&&Math.abs(u.z-zw)<r+6);
+      const up=near(B.defSide,10)&&!near(B.attSide,14);g.door+=((up?1:0)-g.door)*Math.min(1,vdt*3);d.position.y=.1+g.door*(S.H+.8);}
+    S.ram.visible=g.ram;if(g.ram)S.log.position.z=g.bat&&!g.open?Math.max(0,Math.sin(t*3.9))*1.4-.4:-.4;});
 }
 /* ---- standards: every unit carries one, a pole with a crossbar and a cloth that stirs in the wind ---- */
 function mkBanners(scene){
@@ -2597,14 +2904,14 @@ transformed.z+=sin(uT*2.7+position.x*2.4+ph)*.1*(.4+hang)-hang*hang*.08;transfor
 }
 function updBanners(){ // the standard rides beside a man in the middle of the second rank (on the howdah for elephants)
   const {P,C}=R3.ban,Y=_d.set(0,1,0);
-  B.units.forEach((u,i)=>{const al=u.alive,n=al.length;if(!n||!onField(u)){P.setMatrixAt(i,ZERO);C.setMatrixAt(i,ZERO);return;}
+  B.units.forEach((u,i)=>{const al=u.alive,n=al.length;if(!n||!onField(u)||(u.hid&&u.side===1)){P.setMatrixAt(i,ZERO);C.setMatrixAt(i,ZERO);return;}
     const d=u.dm,f=al[Math.min(n-1,d.r>1?d.f+(d.f>>1):d.f>>1)],el=u.kind==='eleph',up=el?3.7:isCav(u)?1.25:0,ox=el?0:.42,oz=el?-.6:-.05,cs=Math.cos(f.yaw),sn=Math.sin(f.yaw);
     _q.setFromAxisAngle(Y,f.yaw);_p.set(f.x+ox*cs+oz*sn,f.y+up,f.z-ox*sn+oz*cs);_s.setScalar(1);_M.compose(_p,_q,_s);P.setMatrixAt(i,_M);C.setMatrixAt(i,_M);});
   P.instanceMatrix.needsUpdate=C.instanceMatrix.needsUpdate=true;
 }
 function buildZone(scene){
-  const T=THREE,Z=zoneOf(0),g=new T.PlaneGeometry(Z.x1-Z.x0,Z.z1-Z.z0,30,8);g.rotateX(-Math.PI/2);g.translate((Z.x0+Z.x1)/2,0,(Z.z0+Z.z1)/2);
-  const p=g.attributes.position;for(let i=0;i<p.count;i++)p.setY(i,heightAt(p.getX(i),p.getZ(i))+.3);
+  const T=THREE,Z=zoneOf(0),am=B.amb===0,g=new T.PlaneGeometry(Z.x1-Z.x0,Z.z1-Z.z0,am?96:30,am?80:8);g.rotateX(-Math.PI/2);g.translate((Z.x0+Z.x1)/2,0,(Z.z0+Z.z1)/2);
+  const p=g.attributes.position;for(let i=0;i<p.count;i++)p.setY(i,heightAt(p.getX(i),p.getZ(i))+(am&&ambBand(p.getX(i),p.getZ(i))?-6:.3)); // an ambush zone: the road itself is sunk out of sight
   const m=new T.Mesh(g,new T.MeshBasicMaterial({color:0x8fd0ff,transparent:true,opacity:.22,depthWrite:false,toneMapped:false}));m.renderOrder=1;scene.add(m);return m;
 }
 function mkRibbon(scene){
@@ -2644,14 +2951,15 @@ function buildScene(){
   R3.proj.frustumCulled=false;R3.proj.instanceMatrix.setUsage(T.DynamicDrawUsage);for(let i=0;i<PROJ_N;i++)R3.proj.setMatrixAt(i,ZERO);s.add(R3.proj);
   R3.projFree=[...Array(PROJ_N).keys()].reverse();R3.proj.count=0; // low slots are used first, and only the slots in use are drawn
   R3.dust=mkFX(s,500,true);R3.bits=mkFX(s,500,false);
-  R3.rib=[];for(let i=0;i<30;i++)R3.rib.push(mkRibbon(s));
+  R3.rib=[];for(let i=0;i<44;i++)R3.rib.push(mkRibbon(s));
+  if(B.plaza){R3.plz=mkRibbon(s);R3.plz.renderOrder=1.5;}
   R3.ban=mkBanners(s);
 }
 function teardown(){
   cancelAnimationFrame(R3.raf);R3.raf=0;AU.ambient(false);AU.rain(0);R3.sky=R3.rain=null;
   if(R3.scene)R3.scene.traverse(o=>{if(o.isInstancedMesh)o.dispose();if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});
   if(R3.figDepth)R3.figDepth.dispose();if(R3.mud)R3.mud.tex.dispose();R3.mud=R3.ban=R3.grass=null;
-  R3.scene=null;if(R3.renderer)R3.renderer.renderLists.dispose();
+  R3.scene=null;R3.siege=R3.lad=R3.plz=null;if(R3.renderer)R3.renderer.renderLists.dispose();
   $('#bLabels').innerHTML='';$('#bCards').innerHTML='';$('#battle').classList.add('hidden');
 }
 
@@ -2721,11 +3029,11 @@ function fxDust(x,z,bg,k=1){const s=(bg?1.7:1)*k;fxAdd(R3.dust,x+rnd(-.6,.6),hei
 function fxBlood(x,y,z,dx,dz,n){for(let i=0;i<n;i++){const s=rnd(1,3.2);fxAdd(R3.bits,x,y,z,dx*s+rnd(-1,1),rnd(1.2,3.4),dz*s+rnd(-1,1),rnd(1.5,3.5),rnd(.13,.2),.1,Math.random()<.5?0x7d1010:0x9e1c16,.95,14,.4);}}
 function fxSparks(x,y,z,n){for(let i=0;i<n;i++)fxAdd(R3.bits,x,y,z,rnd(-4,4),rnd(1,4.5),rnd(-4,4),rnd(.16,.3),.14,.05,Math.random()<.5?0xfff0b8:0xffc861,1,9,1.5);}
 
-function spawnVolley(u,t,fl){
+function spawnVolley(u,t,fl,wk){
   const n=Math.min(u.alive.length,Math.round(24*Math.sqrt(4/u.L.per)));t.cover=B.time+fl+.4; // the target raises its shields
   for(let k=0;k<n;k++){let i=R3.projFree.pop();if(i===undefined){const o=B.shots[0];if(!o||B.time-o.t0<o.T)break;i=B.shots.shift().i;} // reuse the oldest spent arrow
     const f=u.alive[k],g=t.alive.length?t.alive[Math.floor(Math.random()*t.alive.length)]:t,gx=g.x+(Math.random()-.5)*2,gz=g.z+(Math.random()-.5)*2,st=Math.random()*.3;
-    f.swk=u.wk;f.sw=-1;f.wait=st+1e-3; // each man draws or winds up after a ragged delay; the missile leaves his hand REL later
+    f.swk=wk||u.wk;f.sw=-1;f.wait=st+1e-3; // each man draws or winds up after a ragged delay; the missile leaves his hand REL later
     B.shots.push({i,p0:[f.x,f.y+1.6,f.z],p1:[gx,heightAt(gx,gz)+.3,gz],t0:B.time+st+REL,T:Math.max(.35,fl-st-REL)*(.95+Math.random()*.1),h:Math.hypot(gx-f.x,gz-f.z)*.22+3,sl:u.T.cls==='sling',q:null,done:false});}
 }
 function updShots(){ // missiles arc to the target; arrows and javelins stay stuck in the ground
@@ -2746,9 +3054,9 @@ function updFigs(vdt){ // soldiers keep their place in the ranks, square off in 
   const t=R3.clk+=vdt,snap=vdt>=50;R3.uT.value=t;
   for(const u of B.units){
     const L=u.L,al=u.alive,n=al.length,d=u.dm,[lx,lz]=latV(u.face),[fx,fz]=fwdV(u.face),cav=isCav(u),bg=big(u);
-    const rt=u.state==='rout',spread=rt?2.4:1,jit=(rt?6:1)*Math.min(1,L.sx/1.5),fight=u.contacts.length>0&&!rt,maxS=(runSp(u)*1.5+3)*vdt;
+    const rt=u.state==='rout',spread=rt?2.4:u.form==='loose'?1.5:1,jit=(rt?6:1)*Math.min(1,L.sx/1.5),fight=u.contacts.length>0&&!rt,maxS=(runSp(u)*1.5+3)*vdt;
     const reach=REACH(u),stride=u.kind==='eleph'?5:cav?3.4:1.7,gait=u.kind==='eleph'?15:cav?6:3.5,duel=fight?(u.kind==='spear'?2:1):0;
-    const guard=fight?1:u.cover>B.time&&u.wk!=='bow'&&u.wk!=='sling'?2:0;
+    const guard=u.form==='testudo'?2:fight?1:u.cover>B.time&&u.wk!=='bow'&&u.wk!=='sling'?2:0; // testudo: shields up the whole time
     for(let j=0;j<n;j++){const f=al[j],file=j%d.f,rank=Math.floor(j/d.f),rowN=rank===d.r-1?n-rank*d.f:d.f;
       const ox=((file-(rowN-1)/2)*L.sx+f.jx*jit)*spread,oz=(((d.r-1)/2-rank)*L.sz+f.jz*jit)*spread;
       let tx=u.x+lx*ox+fx*oz,tz=u.z+lz*ox+fz*oz,face=u.face,e=null;
@@ -2771,7 +3079,8 @@ function updFigs(vdt){ // soldiers keep their place in the ranks, square off in 
       u.dustT=u.running||rt?(bg?.06:.14):.22;const f=al[Math.floor(Math.random()*n)];fxDust(f.x,f.z,bg);}
   }
   for(const u of B.units){const bg=big(u),cav=isCav(u),wk=u.wk,rest=(u.contacts.length&&u.state!=='rout'?READY:RELAX)[wk],free=wk!=='spear'&&wk!=='lance'&&wk!=='tusk';
-    for(const f of u.figs){let sc=f.fled?0:f.sc,tilt=0,roll=0,ap=rest,push=0,ay=0,sp=.1,sy=0,nk=0,lean=0,wa=f.wa;
+    const unseen=u.hid&&u.side===1; // an enemy lying in ambush: not a man of them shows
+    for(const f of u.figs){let sc=f.fled||unseen?0:f.sc,tilt=0,roll=0,ap=rest,push=0,ay=0,sp=.1,sy=0,nk=0,lean=0,wa=f.wa;
       if(f.alive){
         if(f.wait>0&&(f.wait-=vdt)<=0)f.sw=0;
         if(f.sw>=0){const p0=f.sw,h=HIT[f.swk];f.sw+=vdt/SWING[f.swk];if(h&&p0<h&&f.sw>=h)blow(f);if(f.sw>=1)f.sw=-1;}
@@ -2783,7 +3092,7 @@ function updFigs(vdt){ // soldiers keep their place in the ranks, square off in 
         if(f.hit>0){lean-=f.hit*.9;f.hit-=vdt;}
         if(cav)nk+=Math.sin(f.wp*2)*.12*wa+Math.sin(t*.8+f.ph)*.04;else if(u.kind==='eleph')nk+=Math.sin(t*.9+f.ph)*.15;
         tilt=bg?lean*.35+(cav?Math.sin(f.wp)*.07*wa:0):lean;
-        f.y=heightAt(f.x,f.z)+Math.abs(Math.sin(f.wp))*(cav?.2:bg?.1:.07)*wa;
+        f.y=heightAt(f.x,f.z)+Math.abs(Math.sin(f.wp))*(cav?.2:bg?.1:.07)*wa+wallLift(f.x,f.z);
       }else if(!f.fled){ // falling: back, forward, sideways, or through the air when a charge hits
         if(f.air){f.vy-=22*vdt;f.ay+=f.vy*vdt;if(f.ay<=0&&f.vy<0){f.ay=0;f.air=false;f.vy=0;}}
         if(f.vx||f.vz){f.x+=f.vx*vdt;f.z+=f.vz*vdt;if(B.blk){const o=unblock(f.x,f.z,B.blk,B.esc);if(o){f.x=o[0];f.z=o[1];f.vx=f.vz=0;}}if(!f.air){const k=Math.exp(-vdt*7);f.vx*=k;f.vz*=k;if(Math.abs(f.vx)+Math.abs(f.vz)<.05)f.vx=f.vz=0;}}
@@ -2801,6 +3110,8 @@ function updFigs(vdt){ // soldiers keep their place in the ranks, square off in 
   if(!snap){fxUpd(R3.dust,vdt);fxUpd(R3.bits,vdt);}
   if(R3.ban)updBanners();
 }
+function wallLift(x,z){ // a man crossing the wall away from a gate goes up and over it (the ladders)
+  if(!B.gates||!B.gates.length)return 0;const d=Math.abs(z-WALL_Z*B.ter.ts);if(d>2.8||atGate(x))return 0;return WALL_H[B.walls]*(1-(d/2.8)**2);}
 function updRibbons(){
   let k=0;const put=(cx,cz,face,a,b,w,col,op)=>{if(k<R3.rib.length)setRibbon(R3.rib[k++],cx,cz,face,a,b,w,col,op);};
   for(const id of B.sel){const u=unitById(id);if(!u||!onField(u))continue;const d=u.dm;
@@ -2808,12 +3119,17 @@ function updRibbons(){
     if(B.phase==='battle'&&u.order==='move'&&u.dest)put(u.dest.x,u.dest.z,u.dest.face,d.hw+.3,d.hd+.3,.3,0xffffff,.55);
     if(u.order==='attack'&&u.target&&onField(u.target)){const e=u.target;put(e.x,e.z,e.face,e.dm.hw+.8,e.dm.hd+.8,.45,0xff5a45,.9);}}
   if(B.insp!=null){const u=unitById(B.insp);if(u&&onField(u))put(u.x,u.z,u.face,u.dm.hw+.7,u.dm.hd+.7,.35,u.side?0xff8a7a:0xffffff,.8);}
+  if(B.drag&&B.drag.on){const sl=lineSlots(selUnits(),B.drag.a,B.drag.b);if(sl)for(const [u,x,z,f,fi] of sl){const L=u.L,n=u.alive.length,hw=Math.min(fi,n)*L.sx/2,hd=Math.max(1.4,Math.ceil(n/fi)*L.sz/2);put(x,z,f,hw,hd,.35,0xffffff,.7);}}
   for(let i=k;i<R3.rib.length;i++)R3.rib[i].visible=false;
+  const P=B.plaza;if(R3.plz&&P){const me=(P.st==='att'&&B.attSide===0)||(P.st==='def'&&B.defSide===0),pulse=.55+.35*Math.sin(R3.clk*6);
+    setRibbon(R3.plz,0,P.z,0,P.hw,P.hd,.6,P.st==='cont'?0xffd166:P.st==='none'?0xf1e3c2:me?0x8fd0ff:0xff5a45,P.st==='cont'||P.st==='att'?pulse:.45);}
 }
 function projectU(u,h){_v.set(u.x,heightAt(u.x,u.z)+h,u.z).project(R3.cam);if(_v.z>1)return null;return[(_v.x+1)/2*R3.W,(1-_v.y)/2*R3.H];}
 const labH=u=>u.kind==='eleph'?7.5:isCav(u)?5.2:3.6;
+function sightTick(){ // who of the enemy can be made out (fog, dusk, rain): within sight of one of your units
+  const sg=B.wx.sight;for(const u of B.units)if(u.side===1)u.seen=!sg||B.units.some(m=>m.side===0&&onField(m)&&Math.hypot(m.x-u.x,m.z-u.z)<sg+m.dm.hw+u.dm.hw);}
 function updLabels(){
-  for(const u of B.units){const el=u.lab,p=onField(u)?projectU(u,labH(u)):null;
+  for(const u of B.units){const el=u.lab,p=onField(u)&&!(u.hid&&u.side===1)&&u.seen!==false?projectU(u,labH(u)):null;
     if(!p||p[0]<-40||p[0]>R3.W+40||p[1]<-40||p[1]>R3.H+40){if(el.style.display!=='none')el.style.display='none';continue;}
     el.style.display='';el.style.transform=`translate(${p[0].toFixed(1)}px,${p[1].toFixed(1)}px) translate(-50%,-100%)`;}
 }
@@ -2847,12 +3163,12 @@ const zoomTo=d=>{camT.d=clamp(d,22,240);};
 const HOLD_MS=450;
 function attachPointer(el){
   const ptrs=new Map();let g=null;
-  const fire=(x,y,hold)=>{const r=el.getBoundingClientRect();onTap(x-r.left,y-r.top,hold,g.touch);};
+  const fire=(x,y,hold)=>{const r=el.getBoundingClientRect();return onTap(x-r.left,y-r.top,hold,g.touch);};
   const noHold=()=>{if(g&&g.hold){clearTimeout(g.hold);g.hold=0;}};
   el.addEventListener('pointerdown',e=>{
     if(!B||!R3.scene)return;try{el.setPointerCapture(e.pointerId);}catch(err){}ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});noHold();
     if(ptrs.size===1){g={mode:e.button===2?'rot':'tap',x0:e.clientX,y0:e.clientY,t0:performance.now(),lx:e.clientX,ly:e.clientY,touch:e.pointerType!=='mouse'};
-      if(g.mode==='tap')g.hold=setTimeout(()=>{if(g&&g.mode==='tap'&&ptrs.size===1){g.hold=0;g.mode='held';fire(g.x0,g.y0,true);}},HOLD_MS);} // press and hold fires while the finger is still down
+      if(g.mode==='tap')g.hold=setTimeout(()=>{if(g&&g.mode==='tap'&&ptrs.size===1){g.hold=0;g.mode='held';const r=fire(g.x0,g.y0,true);if(r&&r.line){g.mode='line';B.drag={a:r.line,b:r.line,on:false};buzz();}}},HOLD_MS);} // press and hold fires while the finger is still down
     else if(ptrs.size===2){const [a,b]=[...ptrs.values()];g={mode:'multi',d0:Math.hypot(a.x-b.x,a.y-b.y)||1,a0:Math.atan2(b.y-a.y,b.x-a.x),cd:camT.d,cy:camT.yaw,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};}
   });
   el.addEventListener('pointermove',e=>{
@@ -2860,6 +3176,7 @@ function attachPointer(el){
     if(g.mode==='multi'&&ptrs.size>=2){const [a,b]=[...ptrs.values()],mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
       zoomTo(g.cd*g.d0/Math.max(20,Math.hypot(a.x-b.x,a.y-b.y)));camT.yaw=g.cy+(Math.atan2(b.y-a.y,b.x-a.x)-g.a0);
       panBy(mx-g.mx,my-g.my);g.mx=mx;g.my=my;return;}
+    if(g.mode==='line'){const r=el.getBoundingClientRect(),pt=groundAt(e.clientX-r.left,e.clientY-r.top);if(pt&&B.drag){B.drag.b={x:pt.x,z:pt.z};B.drag.on=Math.hypot(pt.x-B.drag.a.x,pt.z-B.drag.a.z)>=4;}return;}
     if((g.mode==='tap'||g.mode==='held')&&Math.hypot(e.clientX-g.x0,e.clientY-g.y0)>(g.touch?12:8)){g.mode='pan';noHold();} // fingers wobble more than a mouse
     if(g.mode==='pan')panBy(e.clientX-g.lx,e.clientY-g.ly);
     else if(g.mode==='rot'){camT.yaw-=(e.clientX-g.lx)*.008;zoomTo(camT.d*(1+(e.clientY-g.ly)*.004));}
@@ -2868,18 +3185,20 @@ function attachPointer(el){
   const up=e=>{
     if(!ptrs.has(e.pointerId))return;ptrs.delete(e.pointerId);
     if(g&&g.mode==='tap'&&!ptrs.size&&e.type==='pointerup'){noHold();fire(e.clientX,e.clientY,performance.now()-g.t0>=HOLD_MS);}
+    if(g&&g.mode==='line'&&B){const d=B.drag;B.drag=null;if(e.type==='pointerup'&&!B.over&&!B.headless){if(!(d&&d.on&&orderLine(selUnits(),d.a,d.b)))deselect();else hud();}} // a hold without a drag still clears the selection
     if(!ptrs.size){noHold();g=null;}else if(g&&g.mode==='multi'){const [a]=[...ptrs.values()];g={mode:'pan',lx:a.x,ly:a.y};}
   };
   el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up);
   el.addEventListener('contextmenu',e=>e.preventDefault());
   el.addEventListener('wheel',e=>{e.preventDefault();zoomTo(camT.d*Math.exp(e.deltaY*.0012));},{passive:false});
 }
+function groundAt(px,py){R3.ray.setFromCamera(new THREE.Vector2(px/R3.W*2-1,-(py/R3.H)*2+1),R3.cam);const h=R3.ray.intersectObject(R3.ground)[0];return h?h.point:null;}
 function onTap(px,py,hold,touch){
   if(!B||B.over||B.headless)return;
   R3.ray.setFromCamera(new THREE.Vector2(px/R3.W*2-1,-(py/R3.H)*2+1),R3.cam);
   const hit=R3.ray.intersectObject(R3.ground)[0],pt=hit?hit.point:null,o=R3.ray.ray.origin,dv=R3.ray.ray.direction,cands=[];
   const rad=touch?44:30,bx=touch?24:16,bt=touch?36:28,bb=touch?8:3;
-  for(const u of B.units){if(!onField(u))continue;let sc=1e9,lab=false;
+  for(const u of B.units){if(!onField(u)||(u.hid&&u.side===1))continue;let sc=1e9,lab=false;
     const lp=u.lab&&u.lab.style.display!=='none'?projectU(u,labH(u)):null; // the floating badge is drawn over everything, so a tap on it always wins
     if(lp&&Math.abs(px-lp[0])<bx&&py>lp[1]-bt&&py<lp[1]+bb){sc=-50+Math.hypot(px-lp[0],py-lp[1]+13)*.05;lab=true;}
     else{
@@ -2890,7 +3209,7 @@ function onTap(px,py,hold,touch){
   cands.sort((a,b)=>a[0]-b[0]);
   let c=cands[0];
   if(!hold&&c&&!c[2]&&c[1].side===0&&B.phase==='battle'&&B.sel.size){const f=cands.find(x=>x[1].side===1);if(f&&f[0]<c[0]+.75)c=f;} // too close to call beside an enemy: attack rather than reselect
-  if(hold){if(c)unitHold(c[1]);else if(B.sel.size||B.insp!=null){buzz();deselect();}}
+  if(hold){if(c)unitHold(c[1]);else if(pt&&selUnits().length)return{line:{x:pt.x,z:pt.z}};else if(B.sel.size||B.insp!=null){buzz();deselect();}} // held on open ground with troops picked: draw them a line
   else if(c)unitTap(c[1]);else if(pt)groundTap(pt);
 }
 const buzz=()=>{try{const ua=navigator.userActivation;if(navigator.vibrate&&(!ua||ua.hasBeenActive))navigator.vibrate(12);}catch(e){}}; // a tick on Android when a hold lands; iPhones have no vibrate
@@ -2937,16 +3256,16 @@ const fmtT=s=>{s=Math.max(0,Math.ceil(s));return Math.floor(s/60)+':'+String(s%6
 function unitLine(u){
   const col={ok:'var(--good)',waver:'var(--warn)',rout:'var(--bad)'}[u.state]||'var(--ink-2)';
   const doing=u.side===0&&active(u)?(u.contacts.length?' · in melee':u.order==='attack'?(u.T.rng&&u.ammo>0?' · firing':' · attacking'):u.order==='move'?' · marching':''):'';
-  return`<div class="bline">${symSvg(u.kind,FACTIONS[u.fid].color,38)}<div class="main"><div class="t">${u.T.name} ${xpStars(u.xp)}${u.side===1?' <span style="color:var(--ink-2);font-weight:400">· enemy</span>':''}</div><div class="d">${Math.round(u.men)}/${u.max} men · <b style="color:${col}">${STATE_NAME[u.state]}</b> · morale ${Math.max(0,Math.round(u.mor))}${doing}</div><div class="d">ATK ${u.T.atk} · DEF ${u.T.def} · speed ${u.T.mv}${u.T.rng?` · ammo ${u.ammo}`:''}${u.T.charge?` · charge +${u.T.charge}`:''}</div></div></div>`;
+  return`<div class="bline">${symSvg(u.kind,FACTIONS[u.fid].color,38)}<div class="main"><div class="t">${u.T.name} ${xpStars(u.xp)}${u.side===1?' <span style="color:var(--ink-2);font-weight:400">· enemy</span>':''}</div><div class="d">${Math.round(u.men)}/${u.max} men · <b style="color:${col}">${STATE_NAME[u.state]}</b> · morale ${Math.max(0,Math.round(u.mor))}${doing}</div><div class="d">ATK ${u.T.atk} · DEF ${u.T.def} · speed ${u.T.mv}${u.T.rng?` · ammo ${u.ammo}`:''}${u.T.charge?` · charge +${u.T.charge}`:''}</div><div class="d"><b style="color:${['var(--good)','var(--ink-2)','var(--warn)','var(--bad)'][fatLv(u)]}">${FAT_NAME[fatLv(u)]}</b>${u.form?` · ${AB[u.form].ico} ${AB[u.form].name}`:''}${u.cry>B.time?' · 📣 roused':''}${u.side===0&&u.kills?` · ${fmt(u.kills+u.kf)} killed`:''}</div></div></div>`;
 }
 function buildHud(){
   const el=$('#bCards');
-  el.innerHTML=B.units.filter(u=>u.side===0).map(u=>`<button class="bcard" data-u="${u.uid}">${symSvg(u.kind,FACTIONS[PLAYER].color,30)}<span class="bn">${u.T.short}</span><i><b></b></i></button>`).join('');
+  el.innerHTML=B.units.filter(u=>u.side===0).map(u=>`<button class="bcard" data-u="${u.uid}">${symSvg(u.kind,FACTIONS[PLAYER].color,30)}<span class="bn">${u.T.short}</span><i><b></b></i><span class="bfx"></span></button>`).join('');
   el.querySelectorAll('.bcard').forEach(b=>b.onclick=()=>cardTap(+b.dataset.u));
   const L=$('#bLabels');L.innerHTML='';
   for(const u of B.units){
     if(u.side===0)u.card=el.querySelector(`[data-u="${u.uid}"]`);
-    const d=document.createElement('div');d.className='blab'+(u.side===0?' mine':'');d.innerHTML=symSvg(u.kind,FACTIONS[u.fid].color,24)+'<i><b></b></i>';
+    const d=document.createElement('div');d.className='blab'+(u.side===0?' mine':'')+(u.hid?' hid':'');d.innerHTML=symSvg(u.kind,FACTIONS[u.fid].color,24)+'<i><b></b></i>';
     L.appendChild(d);u.lab=d;u.labBar=d.querySelector('b');}
 }
 function reliefTip(){
@@ -2954,9 +3273,35 @@ function reliefTip(){
   const mine=a.filter(u=>u.side===0),foe=a.filter(u=>u.side===1),t=us=>fmtT(Math.min(...us.map(u=>u.arr-B.time)));
   return(mine.length?` <b>Relief:</b> ${mine.length} of your units arrive from the flank in about ${t(mine)}.`:'')+(foe.length?` The enemy has ${foe.length} unit${foe.length>1?'s':''} marching to join him (${t(foe)}).`:'');
 }
+function abilBar(){ // a button for each ability the selected units have between them
+  const el=$('#bAbil'),sel=B.over||B.headless?[]:selUnits(),ks=[...new Set(sel.flatMap(abilsOf))],bat=B.phase==='battle';
+  const rows=ks.map(k=>{const A=AB[k],us=sel.filter(u=>abilsOf(u).includes(k));let on=false,dis=false,note='';
+    if(A.form)on=us.every(u=>u.form===k);
+    else if(k==='pila'){const left=us.filter(u=>u.uses.pila>0);on=left.length&&left.every(u=>u.pila);dis=!bat||!left.length;note=left.length?(on?'ready':'held'):'spent';}
+    else{const ok=us.filter(u=>u.uses[k]>0&&u.abT<=B.time);dis=!bat||!ok.length;note=us.some(u=>u.uses[k]>0)?(ok.length?'':fmtT(Math.min(...us.map(u=>u.abT-B.time)))):'spent';}
+    return[k,on,dis,note];});
+  const key=JSON.stringify(rows);if(key===B.abKey)return;B.abKey=key;
+  el.classList.toggle('hidden',!rows.length);
+  el.innerHTML=rows.map(([k,on,dis,note])=>`<button data-ab="${k}" class="${on?'on':''}" title="${AB[k].tip}" ${dis?'disabled':''}>${AB[k].ico} ${AB[k].name}${note?`<small>${note}</small>`:''}</button>`).join('');
+  el.querySelectorAll('[data-ab]').forEach(b=>b.onclick=()=>{const k=b.dataset.ab,us=selUnits().filter(u=>abilsOf(u).includes(k)),A=AB[k];
+    if(A.form){const off=us.every(u=>u.form===k);for(const u of us)if((u.form===k)===off)useAbility(u,k);}
+    else if(k==='pila'){const left=us.filter(u=>u.uses.pila>0),arm=!left.every(u=>u.pila);for(const u of left)if(u.pila!==arm)useAbility(u,k);}
+    else for(const u of us)useAbility(u,k);
+    B.abKey=null;hud();});
+}
+function siegeTip(){ // what the walls, the square and an ambush mean for the player, in a sentence or two
+  let t='';const pa=B.attSide===0,open=B.gates.filter(g=>g.open).length,nR=B.rams+B.gates.filter(g=>g.ram&&!g.open).length;
+  if(B.gates.length){
+    if(pa)t+=open===B.gates.length?' The gates are broken.':` 🐏 ${nR} ram${nR===1?'':'s'}${B.ramK<1?' (improvised)':''} · 🧗 ${B.ladders} ladder${B.ladders===1?'':'s'}${open?` · ${open} gate${open>1?'s':''} broken`:''}. Send foot soldiers at a gate to batter it, or straight at the wall to climb it.`;
+    else t+=open?` ${open} gate${open>1?'s are':' is'} broken!`:' Your gates are shut against them.';}
+  if(B.plaza)t+=pa?' Hold the town square alone for a minute and the town falls.':' If they hold the town square alone for a minute, the town falls.';
+  if(B.amb===0&&!B.sprung)t+=' 🌿 Your men lie hidden: they show themselves when they attack or are stumbled on.';
+  if(B.amb===1&&!B.sprung)t+=' Your army is strung out in column on the road.';
+  return t;
+}
 function hud(){
-  if(!B)return;const dep=B.phase==='deploy';
-  $('#bRound').textContent=dep?'Deployment':B.over?'Battle over':`${fmtT(BATTLE_TIME-B.time)} ${B.defSide===0?'to hold':'left'}`;
+  if(!B)return;const dep=B.phase==='deploy';sightTick();abilBar();
+  $('#bRound').textContent=dep?'Deployment':B.over?'Battle over':`${fmtT(B.tmax-B.time)} ${B.defSide===0?'to hold':'left'}${plazaTxt()}`;
   $('#bBar0').style.width=(100*sideMen(0)/Math.max(1,B.init[0])).toFixed(0)+'%';$('#bBar1').style.width=(100*sideMen(1)/Math.max(1,B.init[1])).toFixed(0)+'%';
   for(const id of [...B.sel]){const u=unitById(id);if(!u||!active(u))B.sel.delete(id);}
   const main=$('#bMain'),locked=B.over||B.headless;
@@ -2971,14 +3316,15 @@ function hud(){
     u.labBar.style.width=(100*f).toFixed(0)+'%';u.labBar.style.background=c;
     u.lab.classList.toggle('sel',sel||B.insp===u.uid);u.lab.classList.toggle('rout',u.state==='rout');u.lab.classList.toggle('waver',u.state==='waver');
     if(u.card){const b=u.card.querySelector('b');b.style.width=(100*f).toFixed(0)+'%';b.style.background=c;
-      u.card.classList.toggle('sel',sel);u.card.classList.toggle('rout',u.state==='rout');u.card.classList.toggle('gone',!onField(u));}}
+      u.card.classList.toggle('sel',sel);u.card.classList.toggle('rout',u.state==='rout');u.card.classList.toggle('gone',!onField(u));
+      const fl=fatLv(u);u.card.classList.toggle('tired',fl===2);u.card.classList.toggle('exh',fl===3);const fx=u.card.querySelector('.bfx'),ic=u.form?AB[u.form].ico:'';if(fx.textContent!==ic)fx.textContent=ic;}}
   const sel=selUnits(),ins=B.insp!=null?unitById(B.insp):null;let h;
   if(B.headless)h='<div class="b-tip">Resolving the battle…</div>';
   else if(ins)h=unitLine(ins);
   else if(sel.length===1)h=unitLine(sel[0]);
-  else if(sel.length>1)h=`<div class="b-tip"><b>${sel.length} units selected.</b> ${dep?'Tap inside the blue zone to place them.':'Tap the ground to march in formation, or an enemy to attack.'} Hold a unit to add or drop it.</div>`;
-  else if(dep)h=`<div class="b-tip"><b>Deploy your army.</b> Tap a unit or its card, then tap inside the blue zone. Tap it again to deselect; hold a unit to add it to a group. Drag to pan, pinch to zoom.${B.field?' Open ground: no walls to hide behind.':''}${B.walls&&B.defSide===1?(B.fort?' The enemy holds a fort — enter through the gates.':' The enemy holds walls — enter through the gates.'):''}${reliefTip()}</div>`;
-  else h=`<div class="b-tip"><b>${B.speed?'Battle on.':'Paused — orders still work.'}</b> Select units, then tap the ground to march or an enemy to attack. Charge, and hit flanks and rear to break them. ${B.defSide===0?'Hold until time runs out.':'Break them before time runs out.'}${reliefTip()}</div>`;
+  else if(sel.length>1)h=`<div class="b-tip"><b>${sel.length} units selected.</b> ${dep?'Tap inside the blue zone to place them.':'Tap the ground to march in formation, or an enemy to attack.'} Hold the ground and drag to draw them a line. Hold a unit to add or drop it.</div>`;
+  else if(dep)h=`<div class="b-tip"><b>Deploy your army.</b> Tap a unit or its card, then tap inside the blue zone. Tap it again to deselect; hold a unit to add it to a group, hold the ground and drag to draw a line. Drag to pan, pinch to zoom.${B.field&&B.amb==null?' Open ground: no walls to hide behind.':''}${B.amb===0?' Lay your ambush anywhere off the road.':''}${siegeTip()}${reliefTip()}${B.wx.txt?` <b>${ATMOS[B.atmo].ico}</b> ${B.wx.txt}`:''} <b>${FACTIONS[B.o.eFid].adj} tactics — ${B.pers[1].nm.toLowerCase()}:</b> ${B.pers[1].txt}.</div>`;
+  else h=`<div class="b-tip"><b>${B.speed?'Battle on.':'Paused — orders still work.'}</b> Select units, then tap the ground to march or an enemy to attack. Charge, and hit flanks and rear to break them. ${B.defSide===0?'Hold until time runs out.':'Break them before time runs out.'}${siegeTip()}${reliefTip()}</div>`;
   if(h!==B.lastInfo){$('#bInfo').innerHTML=h;B.lastInfo=h;}
 }
 function setSpeed(sp){if(!B||B.phase!=='battle'||B.headless)return;if(B.speed)B.lastSpeed=B.speed;B.speed=sp;hud();}
@@ -2998,27 +3344,52 @@ function startBattle(o,done){
   initRenderer();R3.renderer.setPixelRatio(gfxPR());R3.renderer.shadowMap.enabled=GQ[gfx].shadow>0;
   const attSide=o.playerIsAttacker?0:1;
   B={o,done,phase:'deploy',time:0,speed:1,lastSpeed:1,acc:0,attSide,defSide:1-attSide,walls:o.walls||0,townBonus:1+3*(o.walls||0),field:!!o.field,fort:!!o.fort,land:o.land||null,
-     sel:new Set(),insp:null,over:false,auto:false,headless:false,aiT:[0,0],events:[],pairs:new Set(),rLoss:[0,0],shots:[],uiT:0,lastInfo:'',lastCard:{id:null,t:0},atmo:ATMOS[o.atmo]?o.atmo:pickAtmo()};
-  B.ter=mkTerrain(B.defSide);B.town=mkTown();mkBlock();
+     sel:new Set(),insp:null,over:false,auto:false,headless:false,aiT:[0,0],events:[],pairs:new Set(),rLoss:[0,0],shots:[],uiT:0,lastInfo:'',lastCard:{id:null,t:0},atmo:ATMOS[o.atmo]?o.atmo:pickAtmo(),amb:o.ambush&&o.field?1-attSide:null,sprung:false,springT:rnd(9,15),lad:[]};
+  B.tmax=B.walls&&!B.field?SIEGE_TIME:BATTLE_TIME;B.unk=[0,0];B.wx=wxOf(B.atmo);B.pers=[PERS[PLAYER]||PERS.rome,PERS[o.eFid]||PERS.rebels];
+  B.ter=mkTerrain(B.defSide);if(B.amb!=null)ambushLand();B.town=mkTown();mkBlock();
+  B.gates=B.walls&&!B.field?GATES.map(x=>({x,hp:1,open:false,ram:false,bat:null,door:0})):[];
+  B.rams=B.gates.length?o.rams??1:0;B.ramK=o.ramK??.6;B.ladders=B.gates.length?o.ladders||0:0; // a direct assault brings one improvised ram; a siege builds proper ones and ladders
+  B.plaza=B.field?null:{z:(WALL_Z+TOWN_Z)/2*B.ter.ts,hw:24,hd:(TOWN_Z-WALL_Z)/2-1.5,t:0,st:'none'};
   B.units=[...o.pUnits.map(u=>mkBU(u,0,PLAYER)),...o.eUnits.map(u=>mkBU(u,1,o.eFid)),...(o.pRelief||[]).map(r=>mkRelief(r,0,PLAYER)),...(o.eRelief||[]).map(r=>mkRelief(r,1,o.eFid))];
-  autoDeploy(0);autoDeploy(1);B.init=[sideMen(0),sideMen(1)];
+  autoDeploy(0);autoDeploy(1);if(B.amb!=null)ambushDeploy();B.init=[sideMen(0),sideMen(1)];
+  B.pow=[0,1].map(sd=>armyPower(B.units.filter(u=>u.side===sd).map(u=>u.cu))); // for judging the victory afterwards
   for(const u of B.units)u.sg=seg(u);
   buildScene();buildHud();
-  const A=ATMOS[B.atmo],wx=document.createElement('span');wx.className='bwx';wx.innerHTML=A.ico+'<span class="bwn"> '+A.name+'</span>';
+  const A=ATMOS[B.atmo],wx=document.createElement('span');wx.className='bwx';wx.innerHTML=A.ico+'<span class="bwn"> '+A.name+'</span>';if(B.wx.txt)wx.title=B.wx.txt;
   $('#bTitle').textContent=o.title;$('#bTitle').appendChild(wx);$('#bBar0').style.background=FACTIONS[PLAYER].color;$('#bBar1').style.background=FACTIONS[o.eFid].color;
   $('#bLoad').classList.add('hidden');banner(false);fit();
   const Z=zoneOf(0);Object.assign(camT,{tx:0,tz:(Z.z0+Z.z1)/2-30,d:R3.W<600?110:95,yaw:0});Object.assign(cam,camT);
   updFigs(100);hud();
   R3.last=performance.now();R3.raf=requestAnimationFrame(frame);
   AU.bstate('deploy');AU.music('battle');AU.ambient(true);
+  if(B.amb===1){beginBattle();const c=centroid(B.units.filter(u=>u.side===0&&u.state!=='reserve'));Object.assign(camT,{tx:c.x,tz:c.z+(B.ter.ts>0?-1:1)*30,d:R3.W<600?120:105});Object.assign(cam,camT); // caught on the march: no time to deploy
+    for(const u of B.units)if(u.side===0&&u.state!=='reserve'){const zl=clamp(u.z*B.ter.ts+40,-FZ+12,FZ-12);u.order='move';u.dest=openDest({x:roadX(zl),z:zl*B.ter.ts,face:u.face});}
+    banner('On the march through '+o.title.replace(/^Battle (of|at) /,'')+'…');B.events.push({t:4,fn:()=>{if(B&&!B.sprung&&!B.over)banner(false);}});}
 }
+function ambushLand(){ // woods close in on the road from both sides: cover for an army lying in wait
+  const T=B.ter,R=T.R,ts=T.ts;
+  for(let k=0;k<8;k++){const zl=-95+k*27+(R()-.5)*10,sd=k%2?1:-1;if(B.land==='pass'&&R()<.5)continue;T.woods.push({x:roadX(zl)+sd*(44+R()*10),z:zl*ts,r:13+R()*6});}
+}
+function ambushDeploy(){ // the marching army strung out along the road in column; the ambushers hidden on both sides of it
+  const ts=B.ter.ts,col=B.units.filter(u=>u.side===B.attSide&&u.state!=='reserve'),amb=B.units.filter(u=>u.side===B.amb&&u.state!=='reserve');
+  const rk=u=>u.kind==='cav'?3:u.kind==='gen'?1:u.T.rng?2:0;col.sort((a,b)=>rk(a)-rk(b));
+  for(const u of col){u.files=Math.min(isCav(u)||u.kind==='eleph'?4:6,u.alive.length);u.dm=dims(u);}
+  const len=col.reduce((a,u)=>a+u.dm.hd*2+3,0);let zl=Math.min(FZ-20,len/2);
+  for(const u of col){zl-=u.dm.hd;const z=Math.max(zl,-FZ+12);u.x=roadX(z);u.z=z*ts;u.face=Math.atan2(roadX(z+1)-roadX(z-1),2*ts);zl-=u.dm.hd+3;u.home={x:u.x,z:u.z};u.sg=seg(u);}
+  const n2=Math.ceil(amb.length/2),gap=Math.min(36,(2*FZ-70)/Math.max(1,n2));
+  amb.forEach((u,i)=>{const sd=i%2?1:-1,k=i>>1,z=(k-(n2-1)/2)*gap+(sd>0?gap*.3:0),x=clamp(roadX(z)+sd*(50+u.dm.hd),-FX+12,FX-12);
+    u.x=x;u.z=z*ts;u.face=-sd*Math.PI/2;u.hid=true;u.home={x:u.x,z:u.z};u.sg=seg(u);});
+  for(const u of B.units)if(u.state==='reserve'&&u.side===B.amb)u.hid=false;
+}
+const ambBand=(x,z)=>Math.abs(x-roadX(z*B.ter.ts))<30; // an ambush must be laid off the road
+function ambClamp(u){if(B.amb!==u.side||B.phase!=='deploy')return;const rx=roadX(u.z*B.ter.ts),d=u.x-rx;if(Math.abs(d)<30+u.dm.hd)u.x=clamp(rx+(d<0?-1:1)*(30+u.dm.hd),-FX+8,FX-8);}
 function frame(now){
   if(!B||!R3.scene)return;R3.raf=requestAnimationFrame(frame);
   const dt=clamp((now-R3.last)/1000,0,.05);R3.last=now;let vdt=dt; // a frame stamped before the last one must not run time backwards
   if(B.phase==='battle'&&!B.over&&!B.headless){
     B.acc+=dt*B.speed;let n=0;while(B.acc>=SIM_DT&&n<12&&!B.over){simStep(SIM_DT);B.acc-=SIM_DT;n++;}if(n>=12)B.acc=0;vdt=dt*B.speed;}
   else if(B.headless)vdt=dt*4;
-  camUpdate(dt);atmoTick(dt,vdt);updFigs(Math.min(vdt,.2));mudTick(vdt);updShots();updRibbons();updLabels();battleAudio(dt);
+  camUpdate(dt);atmoTick(dt,vdt);updFigs(Math.min(vdt,.2));updSiegeFX(vdt);mudTick(vdt);updShots();updRibbons();updLabels();battleAudio(dt);
   R3.renderer.render(R3.scene,R3.cam);
   B.uiT-=dt;if(B.uiT<=0){B.uiT=.25;hud();}
 }
@@ -3038,20 +3409,48 @@ async function withdraw(){
   if(!B||B.over||B.headless)return;const prev=B.speed;B.speed=0;
   const ok=await modal({title:'Withdraw?',body:'<p>Your army leaves the field and the battle is lost. Units locked in melee lose a quarter of their men as they pull back.</p>',buttons:[{label:'Withdraw',value:1,cls:'primary'},{label:'Keep fighting',value:0}]});
   if(!B||B.over)return;if(!ok){B.speed=prev;return hud();}
-  for(const u of B.units)if(u.side===0&&onField(u)){if(u.contacts.length)u.men=Math.floor(u.men*.75);u.state='fled';for(const f of u.alive)f.fled=true;}
+  for(const u of B.units)if(u.side===0&&onField(u)){if(u.contacts.length){const m=Math.floor(u.men*.75);B.unk[0]+=u.men-m;u.men=m;}u.state='fled';for(const f of u.alive)f.fled=true;}
   endBattle(1,'withdraw');
+}
+function battleGrade(won,myI,myL,enI,enL,odds){ // [name, a line]; odds: our power over theirs before the battle
+  const mf=myL/Math.max(1,myI),ef=enL/Math.max(1,enI);
+  if(won){if(mf>.5&&myL>enL*1.2)return['Pyrrhic Victory','Another such victory, and we are undone.'];
+    if(odds<.75&&mf<.45)return['Heroic Victory','Against the odds — the men will tell of this day for years.'];
+    if(ef>.6&&mf<.3)return['Decisive Victory','Their army is broken.'];
+    if(enL>myL*1.3)return['Clear Victory','The field is ours.'];
+    return['Close Victory','The field is ours, but only just.'];}
+  if(mf>.7&&enL<myL*.5)return['Crushing Defeat','The army is all but destroyed.'];
+  if(enL>=myL)return['Valiant Defeat','They paid dearly for the field.'];
+  return['Defeat','The day is lost.'];
 }
 function endBattle(win,reason){
   if(!B||B.over)return;B.over=true;banner(false);
   AU.ambient(false);AU.music(null,{fade:1.2});if(!B.headless)AU.stinger(win===0?'victory':'defeat');
-  for(const u of B.units)if(u.side!==win&&u.state==='rout')u.men=Math.floor(u.men*.55); // cut down in the pursuit
-  const lost=[0,0],gone=[0,0];
-  for(const u of B.units){const after=u.state==='dead'?0:Math.max(0,Math.round(u.men));lost[u.side]+=u.cu.men-after;if(!after)gone[u.side]++;u.cu.men=after;
-    if(u.side===win&&after>0&&u.fought)u.cu.xp=Math.min(3,(u.cu.xp||0)+1);}
+  const pre=new Map(B.units.map(u=>[u,u.state==='dead'?0:Math.max(0,Math.round(u.men))])),chase=[0,0];
+  for(const u of B.units)if(u.side!==win&&u.state==='rout'){const m=pre.get(u),k=m-Math.floor(m*.55);u.men=m-k;chase[u.side]+=k;} // cut down in the pursuit
+  for(const sd of [0,1]){ // who killed whom: missiles, charges and pila are counted man for man; the melee is shared out by each unit's part in it
+    const us=B.units.filter(u=>u.side===sd),lostPre=B.units.filter(u=>u.side!==sd).reduce((a,u)=>a+u.cu.men-pre.get(u),0)-B.unk[1-sd];
+    const ex=us.reduce((a,u)=>a+u.kills,0),fr=us.reduce((a,u)=>a+u.kf,0),k=fr>0?Math.max(0,lostPre-ex)/fr:0;
+    for(const u of us)u.kt=Math.max(0,Math.round(u.kills+u.kf*k));}
+  const lost=[0,0],gone=[0,0],init=[0,1].map(sd=>B.units.filter(u=>u.side===sd).reduce((a,u)=>a+u.cu.men,0)),pw=win===0;
+  const rows=[];
+  for(const u of B.units){const after=u.state==='dead'?0:Math.max(0,Math.round(u.men)),before=u.cu.men,xp0=u.cu.xp||0;lost[u.side]+=before-after;if(!after)gone[u.side]++;u.cu.men=after;
+    if(u.side===0)rows.push({u,before,after,xp0});}
+  const grade=battleGrade(pw,init[0],lost[0],init[1],lost[1],B.pow[0]/Math.max(1,B.pow[1]));
+  for(const u of B.units){if(u.side!==win||!u.cu.men)continue; // experience: for fighting, for a bloody day's work, and for a heroic victory
+    let g=u.fought?1:0;if(u.kt>=u.max*.5)g++;if(pw&&grade[0]==='Heroic Victory')g++;u.cu.xp=Math.min(3,(u.cu.xp||0)+g);}
+  const prisoners=Math.round(chase[1-win]*.4);
   hud();
-  const pw=win===0,why=reason==='time'?(B.defSide===0?'The attackers ran out of time and fell back.':'Time ran out before the defenders broke.'):reason==='withdraw'?'You pulled your army off the field.':(pw?'The enemy army broke and fled.':'Your army broke and fled.');
+  const why=reason==='plaza'?(pw?(B.attSide===0?'Your men held the town square — the town is yours.':''):'The enemy held the town square, and the town fell with it.'):reason==='time'?(B.defSide===0?'The attackers ran out of time and fell back.':'Time ran out before the defenders broke.'):reason==='withdraw'?'You pulled your army off the field.':(pw?'The enemy army broke and fled.':'Your army broke and fled.');
   setTimeout(async()=>{
-    await modal({title:pw?'Victory':'Defeat',body:`<p>${why}</p><p>${FACTIONS[PLAYER].adj} losses: <b>${fmt(lost[0])}</b> men${gone[0]?` (${gone[0]} unit${gone[0]>1?'s':''} destroyed)`:''}<br>Enemy losses: <b>${fmt(lost[1])}</b> men${gone[1]?` (${gone[1]} unit${gone[1]>1?'s':''} destroyed)`:''}</p>${pw?'<p>Units that fought gained experience.</p>':''}`,buttons:[{label:'Continue',value:1,cls:'primary'}]});
+    const best=rows.filter(r=>r.u.kt>=10).sort((a,b)=>b.u.kt-a.u.kt)[0];
+    const tbl=`<table class="res"><tr><th></th><th>Unit</th><th>Men</th><th>Killed</th></tr>${rows.map(r=>{const u=r.u,up=(u.cu.xp||0)-r.xp0;
+      return`<tr class="${r===best?'mvp':''}${r.after?'':' dead'}"><td>${symSvg(u.kind,FACTIONS[PLAYER].color,24)}</td><td>${u.T.name} ${xpStars(u.cu.xp||0)}${up>0?`<span class="up">+${up}</span>`:''}${r===best?' 🏅':''}</td><td>${fmt(r.before)} → ${r.after?fmt(r.after):'✝'}</td><td>${fmt(u.kt)}</td></tr>`;}).join('')}</table>`;
+    const extra=`${best?`<p class="rnote">🏅 <b>Hero of the day:</b> the ${best.u.T.name}, with ${fmt(best.u.kt)} of the enemy.</p>`:''}${chase[1-win]?`<p class="rnote">In the pursuit ${pw?'your men':'they'} cut down ${fmt(chase[1-win])} fleeing men${pw&&prisoners?`, and took ${fmt(prisoners)} of them alive.`:'.'}</p>`:''}`;
+    const take=pw&&prisoners>0&&!!G,ran=take?Math.min(prisoners*2,Math.max(0,Math.round(G.gold[B.o.eFid]||0))):0;
+    const ch=await modal({title:grade[0],body:`<p><i>${grade[1]}</i> ${why}</p>${tbl}${extra}<p>${FACTIONS[PLAYER].adj} losses: <b>${fmt(lost[0])}</b> men${gone[0]?` (${gone[0]} unit${gone[0]>1?'s':''} destroyed)`:''}<br>Enemy losses: <b>${fmt(lost[1])}</b> men${gone[1]?` (${gone[1]} unit${gone[1]>1?'s':''} destroyed)`:''}</p>${take?`<p><b>What of the ${fmt(prisoners)} prisoners?</b></p>`:''}`,
+      buttons:take?[{label:`Ransom them · +${fmt(ran)} gold from ${theF(B.o.eFid)}`,value:'ransom',cls:'gold'},{label:`Sell them as slaves · +${fmt(prisoners*3)} gold`,value:'slaves',cls:'ghost'}]:[{label:'Continue',value:1,cls:'primary'}]});
+    if(ch==='ransom'){G.gold[PLAYER]+=ran;G.gold[B.o.eFid]-=ran;}else if(ch==='slaves')G.gold[PLAYER]+=prisoners*3;
     const done=B.done;teardown();B=null;AU.music('campaign',{delay:3,fade:3});done({winnerSide:win});
   },B.headless?50:1200);
 }
@@ -3619,7 +4018,7 @@ function cmFront(n,s){ // the way a city's army faces: toward the nearest enemy,
 /* ---- sync the 3D scene with the game state ---- */
 function cmSync(){
   if(!CM.ok||!G)return;
-  tidyPasses();
+  tidyPasses();if(!UI.busy)tidySieges(); // not mid-march: an assaulting army is briefly away from its siege camp
   const mv=UI.move,adj=mv?new Set(moveTargets(mv.from)):null,dz=dangerScan();
   if(UI.sel!==CM.lastSel){CM.lastSel=UI.sel;if(UI.sel){const c=CM.city[UI.sel];if(c.vis&&c.by>CM.H*.42)cmCenterOn(UI.sel,true,.2);}} // keep a picked city above the sheet
   for(const n of NODES){
@@ -3634,10 +4033,10 @@ function cmSync(){
     const ak=s.owner+'|'+s.units.map(u=>u.type).join(',');if(c.ak!==ak)cmSetArmy(c,s.owner,s.units.map(u=>u.type),ak);
     c.fy=cmFront(n,s);
     const ready=s.owner===PLAYER&&s.units.some(u=>!u.moved),isT=!!(adj&&adj.has(n.id)),foe=isT&&s.owner!==PLAYER,dg=!!dz[n.id];
-    const lk=[s.owner,s.units.length,ready?1:0,s.build&&s.owner===PLAYER?1:0,cap?1:0,foe?1:0,dg?1:0,s.wonder].join('|');
+    const sg=besieged(s),lk=[s.owner,s.units.length,ready?1:0,s.build&&s.owner===PLAYER?1:0,cap?1:0,foe?1:0,dg?1:0,s.wonder,sg?1:0].join('|');
     if(c.lk!==lk){
       c.lk=lk;c.lw=0;c.lab.style.setProperty('--fc',F.color);c.lab.classList.toggle('foe',foe);c.lab.classList.toggle('danger',dg);
-      c.ls.textContent=(dg?'⚠️':'')+(cap?'★':'')+(s.wonder?WONDERS[s.wonder].ico:'')+(s.build&&s.owner===PLAYER?'🔨':'');c.ls.style.display=c.ls.textContent?'':'none';
+      c.ls.textContent=(dg?'⚠️':'')+(sg?'⛺':'')+(cap?'★':'')+(s.wonder?WONDERS[s.wonder].ico:'')+(s.build&&s.owner===PLAYER?'🔨':'');c.ls.style.display=c.ls.textContent?'':'none';
       c.lb.textContent=s.units.length||'';c.lb.style.display=s.units.length?'':'none';c.lb.classList.toggle('ready',ready);
     }
     c.small=tr===1&&!cap;c.pri=(cap?3:0)+(s.owner===PLAYER?4:0)+tr+(UI.sel===n.id?30:0)+(isT?20:0)+(dg?20:0);
@@ -3646,7 +4045,7 @@ function cmSync(){
     c.tgt.visible=isT;if(isT)c.tgt.material=foe?CM.ringFoe:CM.ringGo;
   }
   for(const n of PNODES){ // passes and forts
-    const c=CM.city[n.id],s=G.s[n.id],held=s.units.length>0,fort=s.bld.walls,own=held||fort?s.owner:null;
+    const c=CM.city[n.id],s=seen(G.s[n.id]),held=s.units.length>0,fort=s.bld.walls,own=held||fort?s.owner:null;
     const ck=[own,fort,held?1:0].join('|');
     if(c.ck!==ck){c.ck=ck;if(c.mesh){c.grp.remove(c.mesh);c.mesh.geometry.dispose();}
       c.mesh=new THREE.Mesh(cmPassGeo(n,s),CM.mat);c.mesh.castShadow=true;c.grp.add(c.mesh);c.r0=fort?12:9;c.sel.scale.setScalar(c.r0);c.tgt.scale.setScalar(c.r0+3);c.dng.scale.setScalar(c.r0+5);}
@@ -3654,9 +4053,9 @@ function cmSync(){
     let face=NODE[n.a];if(held)for(const e of [NODE[n.a],NODE[n.b]])if(G.s[e.id].owner!==s.owner){face=e;break;} // the army faces the enemy end of its road
     c.fy=Math.atan2(face.x-n.x,face.z-n.z);
     const isT=!!(adj&&adj.has(n.id)),foe=isT&&isFoeTarget(n.id),ready=held&&s.owner===PLAYER&&s.units.some(u=>!u.moved),dg=!!dz[n.id];
-    const lk=[own,s.units.length,ready?1:0,myBuild(s)?1:0,fort,foe?1:0,dg?1:0].join('|');
+    const lk=[own,s.units.length,ready?1:0,myBuild(s)?1:0,fort,foe?1:0,dg?1:0,s.amb?1:0].join('|');
     if(c.lk!==lk){c.lk=lk;c.lw=0;c.lab.style.setProperty('--fc',own?FACTIONS[own].color:'#9a9486');c.lab.classList.toggle('foe',foe);c.lab.classList.toggle('danger',dg);
-      c.ls.textContent=(dg?'⚠️':'')+(fort?'🏰':'⛰')+(myBuild(s)?'🔨':'');
+      c.ls.textContent=(dg?'⚠️':'')+(fort?'🏰':'⛰')+(myBuild(s)?'🔨':'')+(s.amb&&s.owner===PLAYER?'🌿':'');
       c.lb.textContent=s.units.length||'';c.lb.style.display=s.units.length?'':'none';c.lb.classList.toggle('ready',ready);}
     c.small=true;c.pri=(held?2:0)+(held&&s.owner===PLAYER?4:0)+(fort?1:0)+(UI.sel===n.id?30:0)+(isT?20:0)+(dg?20:0);
     c.dng.visible=dg&&!mv;
@@ -3858,7 +4257,7 @@ function cmInit(){
 /* ================= CAMPAIGN AI ================= */
 function hostileDist(f){const d={},q=[];for(const n of NODES)if(G.s[n.id].owner!==f){d[n.id]=0;q.push(n.id);}
   while(q.length){const c=q.shift();for(const m of ADJ[c])if(d[m]===undefined){d[m]=d[c]+1;q.push(m);}}return d;}
-const threat=(s,f)=>moveTargets(s.id).map(id=>G.s[id]).filter(t=>t.owner&&t.owner!==f&&t.owner!=='rebels'&&(!t.pass||t.units.length)).reduce((a,t)=>a+armyPower(t.units),0);
+const threat=(s,f)=>moveTargets(s.id).map(id=>G.s[id]).filter(t=>t.owner&&t.owner!==f&&t.owner!=='rebels'&&(!t.pass||t.units.length)&&!ambFor(t,f)).reduce((a,t)=>a+armyPower(t.units),0);
 function desired(s,f,hd){if(G.cap[f]===s.id)return 7;if(hd[s.id]===1)return clamp(3+Math.round(threat(s,f)/300),3,9);return 1;}
 const AI_EDGE=1.4; // an AI attacks only with this much more power than the defenders (scaled by its aggression)
 const PICKET=.8,PICKET_MIN=.45; // an army camped on a pass toward a rival aims at this share of the rival's power next door, and isn't sent out below the smaller share
@@ -3867,7 +4266,7 @@ const rivalPower=t=>armyPower(t.units)*(t.owner===PLAYER?.9:FACTIONS[t.owner].ag
 const reliefPower=(t,from)=>armyPower(reliefFor(t,t.owner,from).flatMap(r=>r.units)); // the armies next door that would march to t's aid
 const campFree=ps=>{const keep=ps.bld.walls?ps.units.slice().sort((a,b)=>unitPower(b)-unitPower(a)).slice(0,2):[];return ps.units.filter(u=>!u.moved&&!keep.includes(u));}; // a fort keeps its two best units at their post
 function aiNeed(s,f,skip,deep=true,pf=.9){ // power a city of f should hold so that no hostile neighbour (other than skip) dares attack it
-  let m=0;for(const id of moveTargets(s.id)){const t=G.s[id];if(id===skip||!t.owner||t.owner===f||t.owner==='rebels'||(t.pass&&!t.units.length))continue; // free cities never attack
+  let m=0;for(const id of moveTargets(s.id)){const t=G.s[id];if(id===skip||!t.owner||t.owner===f||t.owner==='rebels'||(t.pass&&!t.units.length)||ambFor(t,f))continue; // free cities never attack; an ambush is unseen
     let p=armyPower(t.units);
     if(t.owner===PLAYER)p*=pf; // pf: how much of the player's army next door we expect to come at us
     else{if(deep&&!t.pass)p=Math.max(p*.4,p-aiNeed(t,t.owner,s.id,false)); // it must keep a garrison against its other neighbours
@@ -3889,7 +4288,8 @@ function aiGoal(f){ // the enemy city f is massing against; kept for a while so 
   return{t:G.s[g.t],stage};
 }
 function aiFree(s,f,skip){ // ready units the city can spare; the weakest stay behind until the garrison is strong enough
-  const av=s.units.filter(u=>!u.moved).sort((a,b)=>unitPower(a)-unitPower(b)),keep=s.units.filter(u=>u.moved);
+  const sg=new Set((G.sieges||[]).filter(q=>q.from===s.id&&qf(q)===f).flatMap(q=>q.uids)); // besiegers stay at the siege
+  const av=s.units.filter(u=>!u.moved&&!sg.has(u.uid)).sort((a,b)=>unitPower(a)-unitPower(b)),keep=s.units.filter(u=>u.moved||sg.has(u.uid));
   const need=aiNeed(s,f,skip),minN=G.cap[f]===s.id?2:1;
   while(av.length&&(keep.length<minN||armyPower(keep)<need))keep.push(av.shift());
   return av;
@@ -3900,8 +4300,8 @@ function aiForce(free,req){ // the fewest of the strongest units that reach the 
   for(const u of by){out.push(u);if(armyPower(out)>=req)break;}
   return out;
 }
-function aiStrike(f,free,t,from){ // the force f would send from `from` against t, or null if it wouldn't dare (the player's turn checklist asks the same question)
-  const F=FACTIONS[f],dp=t.units.length?(armyPower(t.units)+reliefPower(t,from))*(1+.15*t.bld.walls):0,needT=t.pass?0:aiNeed(t,f,null,true,.45); // relief counts: it joins the fight. Bolder against the player: losing a city back to them is part of the game
+function aiStrike(f,free,t,from,wf=1,rel=1){ // rel: how much of the relief next door counts (half, when it has to cut through siege lines) // the force f would send from `from` against t, or null if it wouldn't dare (the player's turn checklist asks the same question); wf: how much the walls count
+  const F=FACTIONS[f],dp=t.units.length?(armyPower(t.units)+(rel?reliefPower(t,from)*rel:0))*(1+.15*t.bld.walls*wf):0,needT=t.pass?0:aiNeed(t,f,null,true,.45); // relief counts: it joins the fight. Bolder against the player: losing a city back to them is part of the game
   const send=aiForce(free,Math.max(dp*1.8/F.aggr,needT)),ap=armyPower(send); // enough to win cleanly and to hold the city after
   if(dp>0&&ap<dp*AI_EDGE/F.aggr)return null;
   const left=dp?ap*(.95-.4*(dp/ap)**2):ap; // roughly what survives the fight (see autoResolve)
@@ -3931,6 +4331,7 @@ function aiProjects(s,hd,f,short){ // what the AI would like to build in s, best
 const aiGod=(s,hd)=>order(s)<60?'jove':hd[s.id]===1&&Math.random()<.6?'mars':tier(s)<3?'ceres':pick(['merc','ceres','jove']); // order first; Mars on the frontier; else growth, then trade
 async function aiTurn(f){
   const F=FACTIONS[f];let hd=hostileDist(f),started=0;
+  for(const ps of heldPasses(f))if(canAmb(ps)&&ps.amb==null)ps.amb=Math.random()<(ADJ[ps.id].some(id=>G.s[id].owner===PLAYER)?.85:.5); // most camps on a mountain road or in a forest lie hidden, above all on a road toward the player
   const gap=s=>aiNeed(s,f)-armyPower(s.units); // > 0: the city is too weak for its neighbours
   const short=ownedBy(f).some(s=>gap(s)>0); // while the frontier is short of men, building waits for spare gold
   const save=G.turn>=6&&ownedBy(f).some(s=>isGreat(s)&&!wonderPlanned(s))&&WKEYS.some(w=>!wonderSite(w))?WONDER_COST:0; // a Great City without a wonder: gold is put by for one, and only a city in danger still gets new troops
@@ -3948,22 +4349,30 @@ async function aiTurn(f){
   }
   const goal=aiGoal(f);
   for(const s of shuffle(ownedBy(f))){
-    if(s.owner!==f||!s.units.some(u=>!u.moved))continue;let best=null,bs=0,bestSend=null;
+    if(s.owner!==f||!s.units.some(u=>!u.moved))continue;let best=null,bs=0,bestSend=null,bestSiege=false;
     for(const id of moveTargets(s.id)){const t0=G.s[id];if(t0.owner===f)continue;if(t0.owner===PLAYER&&G.turn<4)continue;
-      if(t0.pass&&!t0.units.length)continue; // armies camp on a pass only when the road makes them
-      const gate=t0.pass?null:gateOn(s.id,id),t=blocksFor(gate,f)?gate:t0; // a hostile pass on the road is fought first
+      if(t0.pass&&(!t0.units.length||ambFor(t0,f)))continue; // armies camp on a pass only when the road makes them
+      const gate=t0.pass?null:gateOn(s.id,id),t=blocksFor(gate,f)&&!ambFor(gate,f)?gate:t0; // a hostile pass on the road is fought first (if they know it's there)
       if(t!==t0&&t.owner===PLAYER&&G.turn<4)continue;
       const pk=gate&&gate.owner===f?campFree(gate):[]; // our own camp on that road falls in with the army as it marches by
-      const free=aiFree(s,f,id).concat(pk);if(!free.length)continue; // what can leave without exposing this city to anyone but the target
-      const k=aiStrike(f,free,t,s);if(!k)continue;const{send,ap,dp,left,needT}=k;
-      let sc=(ap+1)/(dp+50)+(t0.owner==='rebels'?.4:0)+(t0.owner===PLAYER?.3:0)+(G.cap[t0.owner]===t0.id?.25:0)+t0.pop/20000+(goal&&goal.t===t0?.5:0)+(t0.pass?.1:0);
-      if(left<needT*.8)sc*=.35;
-      if(sc>bs){bs=sc;best=t;bestSend=send;}}
+      const q=t.pass?null:siegeOf(t.id,f),ours=q&&q.from===s.id,camp=ours?siegeUnits(q,s).filter(u=>!u.moved):[]; // our own siege of t: its army joins the assault
+      const free=aiFree(s,f,id).concat(pk,camp);if(!free.length)continue; // what can leave without exposing this city to anyone but the target
+      const wf=ours&&q.t>=1?.5:1;let k=aiStrike(f,free,t,s,wf,wf),siege=false;
+      if(!k&&!q&&!t.pass&&t.bld.walls&&t.owner!=='rebels'){k=aiStrike(f,aiFree(s,f,id),t,s,0,0);siege=!!k;} // too strong to storm, weak enough to starve (a siege is fought against the garrison alone): dig in
+      if(!k)continue;const{send,ap,dp,left,needT}=k;
+      const relieve=(G.sieges||[]).some(x=>x.from===t0.id&&G.s[x.to].owner===f); // the army besieging one of ours: drive it off
+      let sc=(ap+1)/(dp+50)+(t0.owner==='rebels'?.4:0)+(t0.owner===PLAYER?.3:0)+(G.cap[t0.owner]===t0.id?.25:0)+t0.pop/20000+(goal&&goal.t===t0?.5:0)+(t0.pass?.1:0)+(relieve?.7:0)+(ours&&q.t>=2?.5:0);
+      if(left<needT*.8)sc*=.35;if(siege)sc*=.6;
+      if(sc>bs){bs=sc;best=t;bestSend=send;bestSiege=siege;}}
     if(!best)continue;
-    const send=bestSend,camp=best.pass?null:gateOn(s.id,best.id);
-    await cmMarchAI(s.id,best.id,f,send);
-    s.units=s.units.filter(u=>!send.includes(u));if(camp)camp.units=camp.units.filter(u=>!send.includes(u));send.forEach(u=>u.moved=true);
-    await doBattle({attFid:f,units:send,from:s,to:best});
+    if(bestSiege){ // the army stays where it is and the siege lines go up
+      bestSend.forEach(u=>u.moved=true);G.sieges=(G.sieges||[]).filter(x=>!(x.to===best.id&&qf(x)===f));G.sieges.push({to:best.id,from:s.id,fid:f,uids:bestSend.map(u=>u.uid),t:0});
+      if(best.owner===PLAYER)report('⛺',`The ${F.adj} army at ${sname(s)} lays siege to ${sname(best)}! Unless you break it, the garrison will starve and the walls will be stormed.`,best.id);
+      continue;}
+    const send=bestSend,camp=best.pass?null:gateOn(s.id,best.id),trap=ambFor(camp,f)?camp:null; // the player's hidden army on that road: they walk into it
+    await cmMarchAI(s.id,trap?trap.id:best.id,f,send);
+    s.units=s.units.filter(u=>!send.includes(u));if(camp&&!trap)camp.units=camp.units.filter(u=>!send.includes(u));send.forEach(u=>u.moved=true);
+    await doBattle({attFid:f,units:send,from:s,to:trap||best,ambush:!!trap});
     if(G.lost)return;
   }
   for(const p of shuffle(PNODES)){ // armies camped on passes: a fort's garrison stays; the rest strike a hostile end of the road, or fall back to a friendly one
@@ -3984,26 +4393,30 @@ async function aiTurn(f){
   for(const s of shuffle(ownedBy(f))){ // pickets: men to spare camp on the pass toward a rival, so that an attack down that road is met in the open field first
     for(const pid of shuffle(CPASS[s.id].slice())){
       const ps=G.s[pid],p=PNODE[pid],o=G.s[p.a===s.id?p.b:p.a];
-      if(s.owner!==f||G.lost||(ps.units.length&&ps.owner!==f)||o.owner===f||o.owner==='rebels')continue; // an enemy camp is for the attack loop
-      const foe=rivalPower(o),have=armyPower(ps.units)*(1+.15*ps.bld.walls);if(have>=foe*PICKET)continue;
+      const trap=ambFor(ps,f); // looks empty to them
+      if(s.owner!==f||G.lost||(ps.units.length&&ps.owner!==f&&!trap)||o.owner===f||o.owner==='rebels')continue; // an enemy camp is for the attack loop
+      const foe=rivalPower(o),have=trap?0:armyPower(ps.units)*(1+.15*ps.bld.walls);if(have>=foe*PICKET)continue;
       const free=aiFree(s,f);if(!free.length)break;
       const send=aiForce(free,foe*PICKET-have).slice(0,MAX_UNITS-ps.units.length);
       if(!send.length||have+armyPower(send)<foe*PICKET_MIN)continue; // too few to stand: they would only be swept away
       await cmMarchAI(s.id,pid,f,send);
       s.units=s.units.filter(u=>!send.includes(u));send.forEach(u=>u.moved=true);
+      if(trap){await doBattle({attFid:f,units:send,from:s,to:ps,ambush:true});if(G.lost)return;break;}
       if(ps.units.length)ps.units.push(...send);else takePass(ps,f,send,s);
     }
   }
   hd=hostileDist(f);
   const toStage={},st=goal&&goal.stage&&goal.stage.owner===f?goal.stage.id:null; // steps through our own land to the gathering city
-  if(st){toStage[st]=0;const q=[st];while(q.length){const c=q.shift();for(const m of ADJ[c])if(toStage[m]===undefined&&G.s[m].owner===f&&!blocksFor(gateOn(c,m),f)){toStage[m]=toStage[c]+1;q.push(m);}}}
+  if(st){toStage[st]=0;const q=[st];while(q.length){const c=q.shift();for(const m of ADJ[c])if(toStage[m]===undefined&&G.s[m].owner===f&&!aiBlock(gateOn(c,m),f)){toStage[m]=toStage[c]+1;q.push(m);}}}
   for(const s of shuffle(ownedBy(f))){ // spare troops go to the neighbour that most needs them, then to the gathering army, then toward the front
     const free=aiFree(s,f);if(!free.length)continue;
-    const nb=ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner===f&&t.units.length<MAX_UNITS&&!blocksFor(gateOn(s.id,t.id),f)); // never through a rival's camp on the road
+    const nb=ADJ[s.id].map(id=>G.s[id]).filter(t=>t.owner===f&&t.units.length<MAX_UNITS&&!aiBlock(gateOn(s.id,t.id),f)); // never through a rival's camp on the road (that it knows of)
     let dest=null,dd=0;for(const t of nb){const g=gap(t);if(g>dd){dd=g;dest=t;}}
     if(!dest&&toStage[s.id]>0)dest=nb.filter(t=>toStage[t.id]<toStage[s.id])[0];
     if(!dest&&hd[s.id]>1)dest=nb.filter(t=>hd[t.id]<hd[s.id])[0];if(!dest)continue;
     const mv=[];for(const u of free.sort((a,b)=>unitPower(b)-unitPower(a))){if(dest.units.length+mv.length>=MAX_UNITS)break;mv.push(u);if(dd>0&&armyPower(mv)>=dd)break;}
+    const trap=gateOn(s.id,dest.id);
+    if(ambFor(trap,f)){await cmMarchAI(s.id,trap.id,f,mv);s.units=s.units.filter(u=>!mv.includes(u));mv.forEach(u=>u.moved=true);await doBattle({attFid:f,units:mv,from:s,to:trap,ambush:true});if(G.lost)return;continue;} // straight into the player's ambush
     s.units=s.units.filter(u=>!mv.includes(u));mv.forEach(u=>u.moved=true);dest.units.push(...mv);}
 }
 
@@ -4014,7 +4427,7 @@ function econTick(f){
     if(s.build){s.build.t--;if(s.build.t<=0){const r=finishProj(s,f);
       nextBuild(s);if(r&&!s.build&&BKEYS.some(b=>s.bld[b]<Math.min(3,tier(s))))r.text+=' Nothing else is queued there.';}}
     s.pop=Math.round(s.pop*(1+growth(s)/100));s.unrest=Math.max(0,s.unrest-5);s.rec=0;
-    for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*.12*heal));
+    if(!besieged(s))for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*.12*heal)); // no food comes in to a besieged city, and the wounded don't recover
     if(order(s)<20&&s.units.length<2&&G.cap[f]!==s.id&&Math.random()<.35){
       const back=dropQueue(s);s.owner='rebels';s.units=['rb_mil','rb_mil','rb_sling'].map(t=>mkUnit(t,false));s.unrest=0;s.tax=1;
       if(f===PLAYER)report('🔥',`${sname(s)} revolted and declared itself free!${back?` The ${fmt(back)} gold set aside for its building queue was returned.`:''}`,s.id);}
@@ -4040,14 +4453,15 @@ const CHK_KEY='imperivm-check';let chkOn=true;try{chkOn=localStorage.getItem(CHK
 function dangerTo(t){ // the strongest rival army next door that could attack t (a city or pass of the player's) this coming turn, by the AI's own rules and with the men it has now; null if none
   if(G.turn<4)return null; // the AI leaves the player alone for the first turns
   let worst=null;const add=(f,ap,from,us)=>{if(!worst||ap>worst.ap)worst={f,ap,from,n:us.length,men:sumMen(us)};}; // from: where that army stands now
-  for(const id of moveTargets(t.id)){const s=G.s[id],f=s.owner;if(!f||f===PLAYER||f==='rebels'||!s.units.length)continue;
+  for(const id of moveTargets(t.id)){const s=G.s[id],f=s.owner;if(!f||f===PLAYER||f==='rebels'||!s.units.length||hidAmb(s))continue; // an unseen ambush gives no warning
     if(s.pass){ // an army camped on the road strikes either end with all but a fort's two best units (the pass-army loop in aiTurn)
       const free=campFree(s);if(!free.length)continue;
       const ap=armyPower(free),dp=t.units.length?(armyPower(t.units)+reliefPower(t,s))*(1+.15*t.bld.walls):0;
       if(!dp||ap>=dp*AI_EDGE/FACTIONS[f].aggr)add(f,ap,id,free);continue;}
     const gate=t.pass?null:gateOn(s.id,t.id);if(blocksFor(gate,f))continue; // a camp on the road meets them first (when it's ours, it gets its own check)
-    const free=aiFree(s,f,t.id).concat(gate&&gate.owner===f?campFree(gate):[]);if(!free.length)continue;
-    const k=aiStrike(f,free,t,s);if(k)add(f,k.ap,id,k.send);}
+    const q=t.pass?null:siegeOf(t.id,f),ours=q&&q.from===id;
+    const free=aiFree(s,f,t.id).concat(gate&&gate.owner===f?campFree(gate):[],ours?siegeUnits(q,s).filter(u=>!u.moved):[]);if(!free.length)continue;
+    const w2=ours&&q.t>=1?.5:1,k=aiStrike(f,free,t,s,w2,w2);if(k)add(f,k.ap,id,k.send);}
   return worst;
 }
 const dangerScan=()=>{const d={};if(G.turn>=4)for(const s of [...ownedBy(PLAYER),...heldPasses(PLAYER)]){const x=dangerTo(s);if(x)d[s.id]=x;}return d;}; // the map's ⚠️ markers: every place of the player's that dangerTo flags
@@ -4055,7 +4469,7 @@ const revoltRisk=s=>G.cap[PLAYER]!==s.id&&s.units.length<2&&order({...s,unrest:M
 function easyTargets(){ // ready armies standing next to a prize they would take with overwhelming odds (as forcesBody rates them)
   const out=[];
   for(const s of [...ownedBy(PLAYER),...heldPasses(PLAYER)]){const av=s.units.filter(u=>!u.moved);if(!av.length)continue;const ap=armyPower(av);let best=null;
-    for(const id of moveTargets(s.id)){if(!isFoeTarget(id))continue;const t0=G.s[id],gate=!s.pass&&!t0.pass?gateOn(s.id,id):null,t=blocksFor(gate,PLAYER)?gate:t0;
+    for(const id of moveTargets(s.id)){if(!isFoeTarget(id))continue;const t0=G.s[id],gate=!s.pass&&!t0.pass?gateOn(s.id,id):null,t=seenBlock(gate)?gate:t0;
       const dp=t.units.length?(armyPower(t.units)+reliefPower(t,s))*(1+.15*t.bld.walls):0,r=dp?ap/dp:1e9;
       if(r>1.6&&(!best||r>best.r))best={s,t,r,empty:!dp};}
     if(best)out.push(best);}
@@ -4067,6 +4481,8 @@ function turnItems(){ // [icon, title, text, places to jump to]
   if(gold+net<0)out.push(['💰','The treasury will run dry',`Upkeep outruns income by ${fmt(-net)} a turn, leaving you at ${fmt(gold+net)} gold — and a unit deserts every turn the treasury stays below zero.`,'']);
   const dz=[...own,...heldPasses(PLAYER)].map(s=>[s,dangerTo(s)]).filter(x=>x[1]);
   if(dz.length)out.push(['⚠️','In danger','A rival next door has the men to attack right now. Reinforce, or expect a fight.',dz.map(([s,d])=>go(s,'army',`<span class="sw" style="background:${FACTIONS[d.f].color}"></span>${sname(s)}`)).join('')]);
+  const sg=own.filter(s=>besieged(s));
+  if(sg.length)out.push(['⛺','Under siege','No taxes, no recruits, and from the second turn the garrison starves. Attack the besieging army to break the siege.',sg.map(s=>go(s,'army',sname(s))).join('')]);
   const rv=own.filter(revoltRisk);
   if(rv.length)out.push(['🔥','Revolt brewing','Order is under 20% and fewer than two units keep the peace, so a revolt can break out this turn. Lower taxes or march in troops.',rv.map(s=>go(s,'govern',`${sname(s)} · ${order(s)}%`)).join('')]);
   const idle=own.filter(s=>!s.build&&BKEYS.some(k=>{const lv=s.bld[k];return lv<Math.min(3,tier(s))&&projCost(s,{k,lv})<=gold;}));
@@ -4088,7 +4504,7 @@ async function endTurn(){
   try{
     econTick(PLAYER);
     for(const f of AI_ORDER){if(!ownedBy(f).length)continue;econTick(f);await sleep(120);await aiTurn(f);repaintTerritory();renderNodes();if(G.lost||!ownedBy(PLAYER).length)break;}
-    rebelTick();G.turn++;
+    rebelTick();siegeTick();G.turn++;
     for(const n of ALLN)for(const u of G.s[n.id].units){u.moved=false;u.hop=0;}
     if(ownedBy(PLAYER).length)await runOrders(); // armies under march orders take their next stop as the turn begins
   }finally{$('#busy').classList.add('hidden');UI.busy=false;}
@@ -4243,13 +4659,13 @@ document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest
 document.querySelectorAll('.snd').forEach(b=>b.onclick=()=>{const m=AU.cycle();sndUI();toast(['Music and effects on','Effects only','Sound off'][m]);});
 window.addEventListener('pagehide',()=>{if(G&&!B)save();});
 // local dev only: launch a sample battle with testBattle() from the console
-if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))window.imp={get B(){return B;},get G(){return G;},routeTo,runOrders,dangerScan,undoMove,openCities,onNode,startMove,render,repaintTerritory,drawMap,PNODES,gateOn,reliefFor,moveTargets,UI,doBattle,executeMove,tidyPasses,aiTurn,endTurn,cam,camT,R3,CM,cv,ct,ATMOS,cmSync,beginBattle,atmo:k=>{atmoSet(k);return R3.atmoK;},size(s){if(SIZES.includes(s))unitSize=s;return unitSize;},adv(s){const sp=B.speed;B.speed=1;for(let i=0;i<s/.05&&B&&R3.scene;i++){cancelAnimationFrame(R3.raf);R3.last=performance.now()-50;frame(performance.now());}if(B)B.speed=sp;}},window.testBattle=(p,e,eFid='gauls',walls=0,atmo,x)=>{ // x: {field, fort, land, pRelief:[types], eRelief:[types], delay, playerIsAttacker}
+if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))window.imp={get B(){return B;},aiStrike,aiFree,aiNeed,siegeOf,armyPower,reliefPower,lineSlots,orderLine,selUnits,get G(){return G;},routeTo,runOrders,dangerScan,undoMove,openCities,onNode,startMove,render,repaintTerritory,drawMap,PNODES,gateOn,reliefFor,moveTargets,UI,doBattle,executeMove,tidyPasses,aiTurn,endTurn,cam,camT,R3,CM,cv,ct,ATMOS,cmSync,beginBattle,atmo:k=>{atmoSet(k);return R3.atmoK;},size(s){if(SIZES.includes(s))unitSize=s;return unitSize;},adv(s){const sp=B.speed;B.speed=1;for(let i=0;i<s/.05&&B&&R3.scene;i++){cancelAnimationFrame(R3.raf);R3.last=performance.now()-50;frame(performance.now());}if(B)B.speed=sp;}},window.testBattle=(p,e,eFid='gauls',walls=0,atmo,x)=>{ // x: {field, fort, land, pRelief:[types], eRelief:[types], delay, playerIsAttacker}
   let id=9e5;const mk=t=>({uid:id++,type:t,men:UNITS[t].men,xp:0});x=x||{};
   const rl=(a,sd)=>(a||[]).map((t,i)=>({cu:mk(t),delay:(x.delay||20)+i*3,rx:sd*(i%2?1:-1)}));
   p=p||['general','rm_hastati','rm_principes','rm_triarii','rm_velites','rm_equites','rm_legion'];
   e=e||['ga_war','ga_war','ga_chosen','ga_spear','ga_skirm','ga_cav','ga_noble'];
   $('#title')&&$('#title').classList.add('hidden');
-  return runBattle({title:'Test Battle',playerIsAttacker:x.playerIsAttacker!==false,pUnits:p.map(mk),eUnits:e.map(mk),eFid,walls,atmo,field:x.field,fort:x.fort,land:x.land,pRelief:rl(x.pRelief,1),eRelief:rl(x.eRelief,-1)});
+  return runBattle({title:'Test Battle',playerIsAttacker:x.playerIsAttacker!==false,pUnits:p.map(mk),eUnits:e.map(mk),eFid,walls,atmo,field:x.field,fort:x.fort,land:x.land,ambush:x.ambush,rams:x.rams,ladders:x.ladders,ramK:x.ramK,pRelief:rl(x.pRelief,1),eRelief:rl(x.eRelief,-1)});
 };
 initTitle();
 })();
