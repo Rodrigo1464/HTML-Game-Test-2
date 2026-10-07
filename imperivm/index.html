@@ -1810,6 +1810,7 @@ async function doBattle(o){
 }
 function takePass(to,fid,units,from){ // an army wins a pass or fort, or walks into an empty one, and stops there
   const prev=to.owner,fort=to.bld.walls;if(fid===PLAYER)AU.ui('fanfare');
+  if(prev!==fid)to.amb=null; // the old holders' hiding place is no secret to the new ones
   to.owner=fid;if(!(to.build&&to.build.by===fid))to.build=null; // builders who come back to their own unfinished fort carry on; anyone else tears it down
   const fit=units.slice(0,MAX_UNITS);fit.forEach(u=>u.moved=true);to.units=fit;
   if(units.length>MAX_UNITS&&from&&from.owner===fid)from.units.push(...units.slice(MAX_UNITS));
@@ -2012,7 +2013,8 @@ function mkBU(cu,side,fid){
   for(let i=0;i<n;i++)u.figs.push({u,alive:true,fled:false,fall:0,x:0,z:0,y:0,yaw:u.face,ph:Math.random()*6.28,jx:(Math.random()-.5)*.35,jz:(Math.random()-.5)*.35,mi:0,key:null,
     sc:.94+Math.random()*.12,wp:Math.random()*6.28,wa:0,g:0,sw:-1,swk:null,wait:0,cd:Math.random()*1.5,foe:null,hit:0,kv:0,kx:0,kz:0,die:null,roll:1,air:false,ay:0,vx:0,vy:0,vz:0});
   u.alive=u.figs.slice();u.dm=dims(u);u.wk=WEAP(u);u.pila=abilsOf(u).includes('pila'); // pila fly by themselves unless held back
-  u.mtn=fid==='samnium'&&ROUGH.includes(B.land)?1:0;if(u.mtn)u.mor+=10; // Samnites at home in the mountains
+  u.mtn=fid==='samnium'&&ROUGH.includes(B.land)?1:0; // Samnites at home in the mountains
+  u.mx=T.mor+u.xp*4+u.mtn*10;u.mor=u.mx; // the most courage the unit gets back to when it recovers
   return u;
 }
 function mkRelief(r,side,fid){ // a relief army starts off the field, unseen, and walks on at r.delay seconds
@@ -2050,7 +2052,7 @@ function useAbility(u,k){ // true if it took
   if(B.phase!=='battle')return false;
   if(k==='pila'){if(!(u.uses.pila>0))return false;u.pila=!u.pila;if(me)flt(u,u.pila?'PILA READY':'PILA HELD','#ffd166');return true;}
   if(!(u.uses[k]>0)||u.abT>B.time)return false;u.uses[k]--;
-  if(k==='warcry'){u.cry=B.time+25;u.mor=Math.min(u.T.mor+u.xp*4+15,u.mor+15);u.fat=Math.min(100,u.fat+8);flt(u,'WAR CRY!','#ffd166');sndEv('rally',u);
+  if(k==='warcry'){u.cry=B.time+25;u.mor=Math.min(u.mx+15,u.mor+15);u.fat=Math.min(100,u.fat+8);flt(u,'WAR CRY!','#ffd166');sndEv('rally',u);
     for(const e of B.units)if(e.side!==u.side&&active(e)&&Math.hypot(e.x-u.x,e.z-u.z)<32){e.mor-=8;checkMor(e);}return true;}
   if(k==='rally'){u.abT=B.time+60;flt(u,'RALLY!','#c4f2b0');sndEv('rally',u);
     for(const o of B.units)if(o!==u&&o.side===u.side&&onField(o)&&Math.hypot(o.x-u.x,o.z-u.z)<45){
@@ -2200,7 +2202,7 @@ function updUnit(u,dt){
   if(u.climb){ // on the ladders: they can't move or fight back until they are over, unless the enemy comes down to meet them
     if(u.contacts.length)u.climb=null;
     else{u.spd=0;u.running=false;if((u.climb.t-=dt)<=0){u.x=u.climb.x;u.z=u.climb.z;u.climb=null;flt(u,'OVER THE WALL!','#ffd166');sndEv('rally',u);}return;}}
-  if(!u.contacts.length&&nearFoe(u)>25){u.mor=Math.min(u.T.mor+u.xp*4,u.mor+(2+(hasAura(u)?1.5:0))*dt);u.state=u.mor<35?'waver':'ok';}
+  if(!u.contacts.length&&nearFoe(u)>25){u.mor=Math.min(u.mx,u.mor+(2+(hasAura(u)?1.5:0))*dt);u.state=u.mor<35?'waver':'ok';}
   if(u.contacts.length){
     u.running=false;u.runD=0;u.fought=true;
     let prim=u.target&&u.contacts.includes(u.target)?u.target:null;
@@ -2391,7 +2393,7 @@ function placeFigs(u){ // put every man of a unit in his place in the ranks at o
 function arrive(us){ // relief armies reach the field from the flank and march up to the line
   for(const u of us){
     const sg=u.side===0?1:-1,Z=zoneOf(u.side),town=!B.field&&u.side===B.defSide;
-    u.x=u.rx*(FX-14);u.z=town?sg*(WALL_Z+TOWN_Z)/2:sg*(FZ-12);u.face=homeFace(u.side);u.state='ok';u.mor=u.T.mor+u.xp*4;
+    u.x=u.rx*(FX-14);u.z=town?sg*(WALL_Z+TOWN_Z)/2:sg*(FZ-12);u.face=homeFace(u.side);u.state='ok';u.mor=u.mx;
     for(const f of u.figs)f.fled=false;placeFigs(u);u.sg=seg(u);
     const tx=u.rx*38+rnd(-6,6),tz=sg*(Z.front+(town?3:10));u.home={x:tx,z:tz};u.order='move';u.dest=openDest({x:tx,z:tz,face:homeFace(u.side)});
     if(!B.headless&&R3.scene){flt(u,'RELIEF!',u.side===0?'#c4f2b0':'#ffb3a6');for(let i=0;i<6;i++)fxDust(u.x+rnd(-8,8),u.z+rnd(-3,3),true);}}
@@ -3305,7 +3307,7 @@ function attachPointer(el){
     if(!B||!R3.scene)return;try{el.setPointerCapture(e.pointerId);}catch(err){}ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});noHold();
     if(ptrs.size===1){g={mode:e.button===2?'rot':'tap',x0:e.clientX,y0:e.clientY,t0:performance.now(),lx:e.clientX,ly:e.clientY,touch:e.pointerType!=='mouse'};
       if(g.mode==='tap')g.hold=setTimeout(()=>{if(g&&g.mode==='tap'&&ptrs.size===1){g.hold=0;g.mode='held';const r=fire(g.x0,g.y0,true);if(r&&r.line){g.mode='line';B.drag={a:r.line,b:r.line,on:false};buzz();}}},HOLD_MS);} // press and hold fires while the finger is still down
-    else if(ptrs.size===2){const [a,b]=[...ptrs.values()];g={mode:'multi',d0:Math.hypot(a.x-b.x,a.y-b.y)||1,a0:Math.atan2(b.y-a.y,b.x-a.x),cd:camT.d,cy:camT.yaw,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};}
+    else if(ptrs.size===2){B.drag=null;const [a,b]=[...ptrs.values()];g={mode:'multi',d0:Math.hypot(a.x-b.x,a.y-b.y)||1,a0:Math.atan2(b.y-a.y,b.x-a.x),cd:camT.d,cy:camT.yaw,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};} // a second finger turns a line being drawn into a pinch
   });
   el.addEventListener('pointermove',e=>{
     const p=ptrs.get(e.pointerId);if(!p||!g)return;p.x=e.clientX;p.y=e.clientY;
@@ -4416,7 +4418,7 @@ function aiNeed(s,f,skip,deep=true,pf=.9){ // power a city of f should hold so t
 function aiGoal(f){ // the enemy city f is massing against; kept for a while so its troops don't wander
   const mem=G.ai||(G.ai={});let g=mem[f];
   const fine=id=>{const t=G.s[id];return t.owner!==f&&!(t.owner===PLAYER&&G.turn<4)&&!coalPeace(f,t.owner)&&ADJ[id].some(n=>G.s[n].owner===f);};
-  if(G.coal&&g&&!coalFoe(f,G.s[g.t].owner)&&inCoal(f))g=null; // a new coalition: the old goal gives way to the common enemy
+  if(G.coal&&g&&g.since<G.coal.since&&!coalFoe(f,G.s[g.t].owner)&&inCoal(f))g=null; // a new coalition: a goal picked before it gives way to the common enemy
   if(!g||!fine(g.t)||G.turn-g.since>=8){let best=null,bs=0;
     for(const s of ownedBy(f))for(const id of ADJ[s.id]){const t=G.s[id];if(!fine(id))continue;
       const sc=(2+t.pop/1500+(G.cap[t.owner]===id?2:0)+(t.owner===PLAYER?1:0))/(armyPower(t.units)*(1+.15*t.bld.walls)+150)*(coalFoe(f,t.owner)?2.5:1);
@@ -4467,15 +4469,18 @@ function aiProjects(s,hd,f,short){ // what the AI would like to build in s, best
     for(const id of ADJ[s.id])if(G.s[id].owner===f&&projOk(s,{k:'road',to:id}))o.push([{k:'road',to:id},(1+(resOf(s).trade?.5:0)+(resOf(G.s[id]).trade?.5:0))*(.5+Math.random())]);}
   return o.sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
 }
+function pyrStrike(at,t0,f='greeks'){ // what Pyrrhus's army at `at` would fight on the road to t0 (a hostile camp on the way comes first), or null if he wouldn't; aiPyrrhus and the player's danger warnings both ask this
+  if(!pyrOn()||at.owner!==f)return null;const army=at.units.filter(u=>u.pyr&&!u.moved);if(!army.some(u=>u.type==='ep_pyrrhus'))return null;
+  if(!pyrFoe(f,t0.owner)||(t0.owner===PLAYER&&G.turn<4)||!pyrNear(t0.id)||(t0.pass&&(!t0.units.length||ambFor(t0,f))))return null;
+  const gate=t0.pass||at.pass?null:gateOn(at.id,t0.id),t=blocksFor(gate,f)&&!ambFor(gate,f)?gate:t0;if(!pyrFoe(f,t.owner))return null;
+  const ap=armyPower(army),dp=t.units.length?(armyPower(t.units)+reliefPower(t,at))*(1+.15*t.bld.walls):0;if(dp&&ap<dp*1.3)return null; // bolder than any general of the cities
+  return{t,army,ap,dp};}
 async function aiPyrrhus(f){ // the king seeks battle: his army strikes the best enemy target next to it, or marches on toward the front
   if(!pyrOn())return;
   const at=ALLN.map(n=>G.s[n.id]).find(s=>s.owner===f&&s.units.some(u=>u.type==='ep_pyrrhus'&&!u.moved));if(!at)return;
-  const army=at.units.filter(u=>u.pyr&&!u.moved),ap=armyPower(army);let best=null,bs=0;
-  for(const id of moveTargets(at.id)){const t0=G.s[id];
-    if(!pyrFoe(f,t0.owner)||(t0.owner===PLAYER&&G.turn<4)||!pyrNear(id)||(t0.pass&&(!t0.units.length||ambFor(t0,f))))continue;
-    const gate=t0.pass||at.pass?null:gateOn(at.id,id),t=blocksFor(gate,f)&&!ambFor(gate,f)?gate:t0;if(!pyrFoe(f,t.owner))continue;
-    const dp=t.units.length?(armyPower(t.units)+reliefPower(t,at))*(1+.15*t.bld.walls):0;if(dp&&ap<dp*1.3)continue; // bolder than any general of the cities
-    const sc=(ap+1)/(dp+50)+(t0.owner===PLAYER?.4:0)+(t0.owner==='rome'?.3:0)+t0.pop/20000;if(sc>bs){bs=sc;best=t;}}
+  const army=at.units.filter(u=>u.pyr&&!u.moved);let best=null,bs=0;
+  for(const id of moveTargets(at.id)){const t0=G.s[id],k=pyrStrike(at,t0,f);if(!k)continue;
+    const sc=(k.ap+1)/(k.dp+50)+(t0.owner===PLAYER?.4:0)+(t0.owner==='rome'?.3:0)+t0.pop/20000;if(sc>bs){bs=sc;best=k.t;}}
   if(best){const camp=best.pass||at.pass?null:gateOn(at.id,best.id),trap=ambFor(camp,f)?camp:null;
     await cmMarchAI(at.id,trap?trap.id:best.id,f,army);at.units=at.units.filter(u=>!army.includes(u));army.forEach(u=>u.moved=true);
     await doBattle({attFid:f,units:army,from:at,to:trap||best,ambush:!!trap});return;}
@@ -4617,6 +4622,7 @@ function dangerTo(t){ // the strongest rival army next door that could attack t 
   if(G.turn<4)return null; // the AI leaves the player alone for the first turns
   let worst=null;const add=(f,ap,from,us)=>{if(!worst||ap>worst.ap)worst={f,ap,from,n:us.length,men:sumMen(us)};}; // from: where that army stands now
   for(const id of moveTargets(t.id)){const s=G.s[id],f=s.owner;if(!f||f===PLAYER||f==='rebels'||!s.units.length||hidAmb(s))continue; // an unseen ambush gives no warning
+    const pk=pyrStrike(s,t);if(pk&&pk.t===t)add(f,pk.ap,id,pk.army); // Pyrrhus goes by his own rule: his men never join the cities' armies below
     if(s.pass){ // an army camped on the road strikes either end with all but a fort's two best units (the pass-army loop in aiTurn)
       const free=campFree(s);if(!free.length)continue;
       const ap=armyPower(free),dp=t.units.length?(armyPower(t.units)+reliefPower(t,s))*(1+.15*t.bld.walls):0;
