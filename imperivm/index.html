@@ -178,6 +178,7 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .row.q .ico{font-size:19px}
 .qx{flex:0 0 auto;width:34px;height:34px;border-radius:9px;background:var(--panel);color:var(--ink-2);font-size:15px}
 .qcap{font-family:var(--display);font-size:12.5px;letter-spacing:.04em;color:var(--ink-2);margin:4px 2px 6px}
+.pool{font-size:11.5px;font-weight:400;color:var(--ink-2);margin-left:4px;white-space:nowrap}
 .row.chk{align-items:flex-start}
 .row.chk .t{font-size:15px}
 .jumps{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
@@ -735,6 +736,27 @@ U('rb_mil','Town Militia','MIL','linf',{atk:7,def:6,mor:50},180,25,'barracks',0)
 U('rb_spear','Militia Spearmen','SPR','spear',{atk:6,def:10,mor:55},200,25,'barracks',0);
 U('rb_sling','Slingers','SLG','sling',{},180,25,'barracks',0);
 U('rb_merc','Mamertine Swords','MER','minf',{},300,40,'barracks',0);
+// Mercenaries: anyone with gold can hire them from the region's pool (MERC); they need no barracks, march at once, and cost dear to keep
+U('mc_gaul','Gallic Mercenaries','GMR','minf',{atk:12,def:7,mor:62},380,60,null,0);
+U('mc_ligur','Ligurian Hillmen','LIG','skirm',{def:5,mor:55},210,35,null,0);
+U('mc_umbr','Umbrian Spearmen','UMB','spear',{atk:7,def:11,mor:60},280,45,null,0);
+U('mc_samn','Samnite Mercenaries','SMR','minf',{atk:11,def:9,mor:68},380,60,null,0);
+U('mc_campan','Campanian Cavalry','CMP','hcav',{atk:10,def:8,mor:62},500,80,null,0);
+U('mc_hop','Mercenary Hoplites','MHP','spear',{atk:9,def:13,mor:68},420,65,null,0);
+U('mc_rhod','Rhodian Slingers','RHO','sling',{ratk:11,mor:50},280,40,null,0);
+U('mc_tarent','Tarentine Horse','TAR','lcav',{mv:7,mor:58},360,55,null,0);
+U('mc_mamert','Mamertines','MAM','minf',{atk:11,def:9,mor:66},380,60,null,0);
+U('mc_sicel','Sicel Javelinmen','SIC','skirm',{},200,30,null,0);
+U('mc_numid','Numidian Mercenaries','NMR','lcav',{mv:7,mor:56},340,55,null,0);
+U('mc_iber','Iberian Scutarii','SCU','minf',{atk:11,def:9,mor:64},360,55,null,0);
+U('mc_gaetul','Gaetulian Skirmishers','GAE','skirm',{ratk:10},200,30,null,0);
+// Pyrrhus of Epirus and the army he brings across the sea (see PYRRHUS); his own men are paid from Epirus, so they cost little to keep
+U('ep_pyrrhus','Pyrrhus of Epirus','PYR','gen',{atk:16,def:14,mor:98},0,40,null,0);
+U('ep_phalanx','Epirote Phalangites','PHL','spear',{atk:10,def:16,mor:80},0,30,null,0);
+U('ep_hyp','Epirote Hypaspists','HYP','hinf',{atk:13,def:12,mor:80},0,30,null,0);
+U('ep_cav','Thessalian Cavalry','THS','hcav',{atk:12,def:9,mor:75},0,30,null,0);
+U('ep_eleph','Pyrrhus\'s Elephants','ELE','eleph',{},0,40,null,0);
+const isMerc=t=>t.startsWith('mc_');
 
 /* ================= FACTIONS ================= */
 let PLAYER='rome',AI_ORDER=[]; // set by setPlayer() from the save
@@ -787,6 +809,15 @@ const PLAYABLE={
     hint:'Free Messana guards the straits to Italy, and Syracusae is the great prize on Sicily.',
     fallT:'Carthage has fallen',fall:'The last Punic city is lost. Carthage is no more.',
     triumph:'The Council hails you in Carthago — Italy is a Punic province now.'}
+};
+/* Every people has a way of its own: shown on the faction picker and in the help, and worked into the rules where it bites */
+const PERK={
+  rome:{ico:'🏛️',name:'Colonies',txt:'A city you take can be settled as a Roman colony: settlers come from Roma, the city is calm at once and keeps +10 public order.'},
+  etruria:{ico:'🔨',name:'Master builders',txt:'Etruscan craftsmen build 15% cheaper, and pave roads for a quarter less.'},
+  samnium:{ico:'⛰️',name:'Mountain warriors',txt:'Samnite troops fight harder at passes, on hills and in forests (+2 attack, +1 defence, +10 morale), and can lie in ambush on the hills too.'},
+  gauls:{ico:'🔥',name:'Plunder',txt:'Gallic warbands strip the fallen: 2 gold for every enemy killed in a battle they win, and a sacked city yields twice the loot.'},
+  greeks:{ico:'⛵',name:'Sea trade',txt:'Every Greek port earns +15 gold a turn for each other Greek port, up to +60.'},
+  carthage:{ico:'💰',name:'Mercenary armies',txt:'Mercenaries cost Carthage a quarter less to hire and to keep.'}
 };
 function setPlayer(f){PLAYER=PLAYABLE[f]?f:'rome';AI_ORDER=Object.keys(PLAYABLE).filter(x=>x!==PLAYER);}
 setPlayer('rome');
@@ -950,10 +981,12 @@ function mkUnit(type,moved){return{uid:G.seq++,type,men:UNITS[type].men,xp:0,mov
 function mkPass(p){ // a pass is kept like a city so that armies, battles and saves treat it the same; owner is null while nobody holds it
   return{id:p.id,pass:true,owner:p.owner,pop:0,tax:1,bld:{farms:0,market:0,temple:0,barracks:0,stables:0,walls:p.fort},build:null,units:p.garrison.map(t=>mkUnit(t,false)),unrest:0,rec:0};
 }
-function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);for(const p of PNODES)if(!G.s[p.id])G.s[p.id]=mkPass(p);for(const n of NODES){const s=G.s[n.id];s.queue=s.queue||[];if(s.god===undefined)s.god=s.bld.temple?TEMPLE_GOD[n.id]||'jove':null;s.wonder=s.wonder||null;}G.orders=G.orders||[];G.roads=G.roads||{};G.sieges=G.sieges||[];} // saves from before faction choice were always Rome, and from before passes, building queues, march orders, temple gods, wonders or roads had none
+function useGame(g){G=g;if(!PLAYABLE[G.player])G.player='rome';setPlayer(G.player);for(const p of PNODES)if(!G.s[p.id])G.s[p.id]=mkPass(p);for(const n of NODES){const s=G.s[n.id];s.queue=s.queue||[];if(s.god===undefined)s.god=s.bld.temple?TEMPLE_GOD[n.id]||'jove':null;s.wonder=s.wonder||null;}G.orders=G.orders||[];G.roads=G.roads||{};G.sieges=G.sieges||[];
+  G.merc=G.merc||mercInit();G.coal=G.coal||null;G.pyr=G.pyr||{at:Math.max(G.turn+2,pyrAt())};} // saves from before faction choice were always Rome, and from before passes, building queues, march orders, temple gods, wonders, roads, mercenaries or Pyrrhus had none
+const pyrAt=()=>6+Math.floor(Math.random()*4); // the turn Pyrrhus lands: a few years in, once the war for the south is under way
 function newGame(fid){
   setPlayer(fid);
-  G={v:1,player:PLAYER,turn:1,seq:1,gold:{},cap:{},s:{},reports:[],last:[],orders:[],roads:{},sieges:[],won:false,lost:false};
+  G={v:1,player:PLAYER,turn:1,seq:1,gold:{},cap:{},s:{},reports:[],last:[],orders:[],roads:{},sieges:[],merc:mercInit(),coal:null,pyr:{at:pyrAt()},won:false,lost:false};
   for(const f in FACTIONS){G.gold[f]=f===PLAYER||f==='carthage'?1600:1200;G.cap[f]=FACTIONS[f].capital;}
   for(const [id,,, ,owner,pop,bld,units] of SDEF){
     G.s[id]={id,owner,pop,tax:1,bld:Object.assign({farms:0,market:0,temple:0,barracks:0,stables:0,walls:0},bld),build:null,queue:[],units:[],unrest:0,rec:0,god:bld.temple?TEMPLE_GOD[id]||'jove':null,wonder:null};
@@ -964,7 +997,8 @@ function newGame(fid){
 const passStates=()=>PNODES.map(p=>G.s[p.id]);
 const heldPasses=f=>passStates().filter(s=>s.owner===f&&s.units.length);
 /* ambush: an army camped on a mountain pass or a forest road can lie hidden. Its enemies don't see it on the map, and an army that marches down that road walks into it */
-const canAmb=s=>!!s&&s.pass&&(NODE[s.id].land==='pass'||NODE[s.id].land==='forest')&&!s.bld.walls;
+const ROUGH=['pass','hills','forest'],roughLand=s=>!!s&&!!s.pass&&ROUGH.includes(NODE[s.id].land),MTN_K=1.2; // where the Samnites fight best (MTN_K: their edge in auto-resolve)
+const canAmb=s=>!!s&&s.pass&&(NODE[s.id].land==='pass'||NODE[s.id].land==='forest'||(NODE[s.id].land==='hills'&&s.owner==='samnium'))&&!s.bld.walls; // Samnites can hide on the hills too
 const hidAmb=s=>!!s&&s.pass&&!!s.amb&&s.units.length>0&&s.owner!==PLAYER; // an enemy ambush the player can't see
 const ambFor=(g,f)=>!!g&&g.pass&&!!g.amb&&g.units.length>0&&g.owner===PLAYER&&f!==PLAYER; // the player's ambush, unseen by f
 const seenBlock=g=>blocksFor(g,PLAYER)&&!hidAmb(g); // a hostile camp the player knows about
@@ -1023,14 +1057,14 @@ function capDist(s){const c=G.cap[s.owner];if(!c||G.s[c].owner!==s.owner)return 
 const templeName=s=>s.bld.temple?lvName(s,'temple',s.bld.temple-1):'Temple';
 function orderParts(s){
   return[['Base',70],[templeName(s),s.bld.temple*(TEMPLE_ORDER+(s.god==='jove'?6:0))],['Salt',hasRes(s,'salt')?8:0],['Great Circus',hasWonder(s.owner,'circus')?6:0],['Garrison',Math.min(s.units.length,4)*4],['Taxes',TAX_ORDER[s.tax]],
-    ['City size',-Math.round(s.pop/800)],['Recent conquest',-Math.round(s.unrest)],['Distance from capital',-capDist(s)*3]];
+    ['Roman colony',s.colony?10:0],['City size',-Math.round(s.pop/800)],['Recent conquest',-Math.round(s.unrest)],['Distance from capital',-capDist(s)*3]];
 }
 const order=s=>clamp(orderParts(s).reduce((a,p)=>a+p[1],0),0,120);
 function incomeParts(s){
-  const base=40,tax=s.pop*0.055*TAX_MUL[s.tax],mkt=tax*0.2*s.bld.market,god=s.god==='merc'?tax*.15*s.bld.temple:0,res=resOf(s).gold||0,road=roadTrade(s);
-  let sub=base+tax+mkt+god+res+road;const won=hasWonder(s.owner,'harbour')?sub*.1:0;sub+=won;
+  const base=40,tax=s.pop*0.055*TAX_MUL[s.tax],mkt=tax*0.2*s.bld.market,god=s.god==='merc'?tax*.15*s.bld.temple:0,res=resOf(s).gold||0,road=roadTrade(s),sea=seaTrade(s);
+  let sub=base+tax+mkt+god+res+road+sea;const won=hasWonder(s.owner,'harbour')?sub*.1:0;sub+=won;
   const o=order(s);const pen=o<40?-sub*(1-Math.max(0.3,o/40)):0;
-  return{base,tax,mkt,god,res,road,won,pen,total:besieged(s)?0:Math.round(sub+pen)};
+  return{base,tax,mkt,god,res,road,sea,won,pen,total:besieged(s)?0:Math.round(sub+pen)};
 }
 const income=s=>incomeParts(s).total;
 const growthParts=s=>[['Base',0.8],['Farms',s.bld.farms*0.6],['Taxes',TAX_GROW[s.tax]],['Room to grow (village)',tier(s)===1?0.5:0],['Grain',hasRes(s,'grain')?0.5:0],
@@ -1040,8 +1074,9 @@ function nextTierTxt(s){ // when the city reaches the next size, at today's grow
   const t=tier(s);if(t>=3)return'';const at=TIER_POP[t-1],g=growth(s);
   const n=g>0?Math.ceil(Math.log(at/s.pop)/Math.log(1+g/100)):0;
   return` It becomes a ${t===1?'Town':'City'} at ${fmt(at)} people${n?` — about ${turnsTxt(n)} at ${g>=0?'+':''}${g.toFixed(1)}% a turn`:' — but it is not growing now'}.`;}
-const upkeepOf=units=>units.reduce((a,u)=>a+UNITS[u.type].upk,0);
-const upkeep=f=>ownedBy(f).reduce((a,s)=>a+upkeepOf(s.units),0)+heldPasses(f).reduce((a,s)=>a+upkeepOf(s.units),0);
+const unitUpk=(t,f)=>isMerc(t)&&f==='carthage'?Math.round(UNITS[t].upk*.75):UNITS[t].upk; // Carthage keeps its hired men cheaper
+const upkeepOf=(units,f)=>units.reduce((a,u)=>a+unitUpk(u.type,f),0);
+const upkeep=f=>ownedBy(f).reduce((a,s)=>a+upkeepOf(s.units,f),0)+heldPasses(f).reduce((a,s)=>a+upkeepOf(s.units,f),0);
 const grossIncome=f=>ownedBy(f).reduce((a,s)=>a+income(s),0);
 const netIncome=f=>grossIncome(f)-upkeep(f);
 const canRecruit=(s,t)=>{const r=UNITS[t].req;return(!r||s.bld[r.b]>=r.lv)&&!besieged(s);};
@@ -1052,6 +1087,80 @@ const countGenerals=f=>[...ownedBy(f),...heldPasses(f)].reduce((a,s)=>a+s.units.
 function unitPower(u){const T=UNITS[u.type];return u.men*T.w*(T.atk+T.def+T.ratk*0.6+(u.xp||0)*2+T.charge*0.3)*(0.6+T.mor/200)/10;}
 const armyPower=us=>us.reduce((a,u)=>a+unitPower(u),0);
 const sumMen=us=>us.reduce((a,u)=>a+u.men,0);
+/* Greek sea trade: the ports of Italy, Sicily and Africa; a Greek port earns from every other Greek port */
+const PORTS=new Set(['roma','tarquinii','pisae','genua','ariminum','brundisium','tarentum','croton','rhegium','paestum','messana','syracusae','panormus','lilybaeum','akragas','carthago']);
+const SEA_TRADE=15,SEA_MAX=4;
+function seaTrade(s){if(s.owner!=='greeks'||!PORTS.has(s.id))return 0;let n=0;for(const id of PORTS)if(id!==s.id&&G.s[id].owner==='greeks')n++;return SEA_TRADE*Math.min(SEA_MAX,n);}
+/* Roman colonies: settlers from Roma make a conquered city Roman */
+const COLONY_COST=300,COLONISTS=600;
+const canColony=(s,f)=>f==='rome'&&!s.colony&&G.gold[f]>=COLONY_COST&&G.s.roma.owner==='rome'&&G.s.roma.pop>=3000+COLONISTS&&s.id!=='roma';
+function settleColony(s){G.gold.rome-=COLONY_COST;G.s.roma.pop-=COLONISTS;s.pop+=COLONISTS;s.colony=1;s.unrest=0;}
+
+/* ================= MERCENARIES: hired swords, by region ================= */
+// Each region keeps a pool of men for hire, and whoever holds a city there can hire from it. Hired men are seasoned, march at once, need no barracks and don't count against the two recruits a turn — but they cost dear to keep, and they are the first to walk off when the pay stops. The pool refills slowly.
+const MERC={
+  cisalpina:{name:'Cisalpine Gaul',cities:['mediolanum','taurini','genua','bononia','patavium'],pool:{mc_gaul:3,mc_ligur:2}},
+  etruria:{name:'Etruria and Umbria',cities:['tarquinii','clusium','pisae','ariminum','asculum'],pool:{mc_umbr:2,mc_ligur:1,mc_gaul:1}},
+  latium:{name:'Latium and Campania',cities:['roma','capua','paestum'],pool:{mc_campan:2,mc_samn:1}},
+  samnium:{name:'The Apennines',cities:['corfinium','beneventum','luceria'],pool:{mc_samn:3,mc_campan:1}},
+  graecia:{name:'Magna Graecia',cities:['tarentum','brundisium','croton','rhegium'],pool:{mc_hop:2,mc_rhod:2,mc_tarent:2}},
+  sicilia:{name:'Sicily',cities:['syracusae','messana','panormus','lilybaeum','akragas'],pool:{mc_mamert:2,mc_sicel:2,mc_hop:1}},
+  africa:{name:'Africa',cities:['carthago'],pool:{mc_numid:3,mc_iber:2,mc_gaetul:2}}
+};
+const MERC_OF={};for(const r in MERC)for(const id of MERC[r].cities)MERC_OF[id]=r;
+const MERC_REFILL=.25; // the chance each turn that a pool short of a kind of men gains one more unit of them
+const mercInit=()=>Object.fromEntries(Object.entries(MERC).map(([r,R])=>[r,{...R.pool}]));
+const mercCost=(t,f)=>f==='carthage'?Math.round(UNITS[t].cost*.75/10)*10:UNITS[t].cost;
+const mercPool=s=>!s.pass&&MERC_OF[s.id]?G.merc[MERC_OF[s.id]]:null;
+const canHire=(s,t)=>{const p=mercPool(s);return!!p&&p[t]>0&&!besieged(s)&&s.units.length<MAX_UNITS&&G.gold[s.owner]>=mercCost(t,s.owner);};
+function hireMerc(s,t){if(!canHire(s,t))return null;mercPool(s)[t]--;G.gold[s.owner]-=mercCost(t,s.owner);const u=mkUnit(t,false);u.xp=1;s.units.push(u);return u;}
+function mercTick(){for(const r in MERC){const p=G.merc[r];for(const t in MERC[r].pool)if((p[t]||0)<MERC[r].pool[t]&&Math.random()<MERC_REFILL)p[t]=(p[t]||0)+1;}}
+function aiHire(s,f,need,max){ // the AI hires the best men for the gold until the city has `need` more power (or `max` units)
+  const p=mercPool(s);if(!p)return 0;let n=0;
+  while(n<max&&need>0){const t=Object.keys(p).filter(t=>canHire(s,t)&&G.gold[f]-mercCost(t,f)>=60&&netIncome(f)-unitUpk(t,f)>=-30).sort((a,b)=>unitPower({type:b,men:UNITS[b].men,xp:1})/mercCost(b,f)-unitPower({type:a,men:UNITS[a].men,xp:1})/mercCost(a,f))[0];
+    if(!t)break;const u=hireMerc(s,t);u.moved=true;need-=unitPower(u);n++;} // they still have to find their places: they march next turn
+  return n;}
+
+/* ================= COALITION: the powers of Italy unite against whoever grows too strong ================= */
+const COAL_ON=10,COAL_OFF=8; // cities that make a power the common enemy, and that it must fall below before the others go back to their own quarrels
+const inCoal=f=>!!(G&&G.coal)&&f!==G.coal.f&&f!=='rebels'&&f!==PLAYER; // f is one of the AI powers allied against the leader
+const coalFoe=(f,o)=>inCoal(f)&&o===G.coal.f; // f fights o as the common enemy
+const coalPeace=(f,o)=>inCoal(f)&&inCoal(o); // two allies leave each other alone (the player is never bound by it)
+function coalTick(){
+  const cnt=f=>ownedBy(f).length,c=G.coal;
+  if(c&&cnt(c.f)<COAL_OFF){G.coal=null;report('🕊️',c.f===PLAYER?`The coalition against you has fallen apart: with ${cnt(c.f)} cities you no longer frighten the other powers.`:`The coalition against ${theF(c.f)} has broken up, and the powers of Italy go back to their own quarrels.`);}
+  if(G.coal)return;
+  const lead=Object.keys(PLAYABLE).sort((a,b)=>cnt(b)-cnt(a))[0];if(cnt(lead)<COAL_ON)return;
+  G.coal={f:lead,since:G.turn};
+  report('🤝',lead===PLAYER?`Alarmed by your ${cnt(lead)} cities, the other powers of Italy have made common cause against you. They leave each other in peace now, and their armies will come for you, and harder.`:`${theF(lead,1)} now hold${FACTIONS[lead].sg?'s':''} ${cnt(lead)} cities, and the other powers have joined against ${FACTIONS[lead].sg?'it':'them'}: they leave each other in peace and throw their armies at ${theF(lead)}. The coalition breaks up once ${theF(lead)} hold${FACTIONS[lead].sg?'s':''} fewer than ${COAL_OFF}.`);
+}
+
+/* ================= PYRRHUS: the king of Epirus answers Tarentum's call ================= */
+const PYR_ARMY=['ep_pyrrhus','ep_phalanx','ep_phalanx','ep_hyp','ep_cav','ep_eleph','ep_eleph'],PYR_STAY=12,PYR_REACH=3; // turns before he sails home; how many roads from his landing he will march
+const PYR_LAND=['tarentum','brundisium','croton','rhegium','paestum','syracusae']; // the Greek ports he will land at, most wanted first
+const pyrOn=()=>!!(G&&G.pyr&&G.pyr.city&&!G.pyr.done);
+const pyrFoe=(f,o)=>!!o&&o!==f&&o!=='samnium'&&!coalPeace(f,o); // whom he will fight: never his Samnite allies
+const pyrNear=id=>{const c=G.pyr.city,p=PNODE[id];return Math.min(...(p?[p.a,p.b]:[id]).map(x=>DIST[c][x]??9))<=PYR_REACH;}; // he fights for the Greek south, not for the Alps
+function pyrrhusTick(){ // he lands when G.turn reaches G.pyr.at, at the first Greek port that will have him; PYR_STAY turns later he sails home with what is left of his army
+  const P=G.pyr;if(!P||P.done)return;
+  if(!P.city){if(G.turn<P.at)return;
+    const s=PYR_LAND.map(id=>G.s[id]).find(s=>s.owner==='greeks');
+    if(!s){P.done=1;report('⛵','Pyrrhus of Epirus had promised to help the Greeks of Italy, but with their cities lost he stays at home.');return;}
+    P.city=s.id;P.t=G.turn;let left=PYR_ARMY.map(t=>{const u=mkUnit(t,false);u.xp=1;u.pyr=1;return u;}),n=left.length;
+    const nb=ADJ[s.id].map(id=>G.s[id]).filter(c=>c.owner==='greeks');
+    for(const u of s.units.slice().sort((a,b)=>unitPower(a)-unitPower(b))){if(MAX_UNITS-s.units.length>=left.length)break;const c=nb.find(c=>c.units.length<MAX_UNITS);if(!c)break;s.units=s.units.filter(x=>x!==u);c.units.push(u);} // the port makes room: its own men move up the road
+    for(const c of [s,...nb]){const k=left.splice(0,MAX_UNITS-c.units.length);c.units.push(...k);} // the ships unload into the port (and the Greek cities nearby, if it is still full)
+    n-=left.length;
+    report('🐘',PLAYER==='greeks'?`Pyrrhus, king of Epirus, has landed at ${sname(s)} with ${n} units — his phalanx, Thessalian horse and elephants — to fight for you! Epirus pays his men, so they cost you little — but it sends no fresh ones, so every loss is for good. He means to stay ${PYR_STAY} turns.`
+      :`Pyrrhus, king of Epirus, has landed at ${sname(s)} with a great army — phalanx, Thessalian horse and elephants — to fight for the Greek cities of Italy!${PLAYER==='rome'?' The Senate expects you to meet him.':PLAYER==='samnium'?' He counts the Samnites as his allies, and his own army will not march against you.':''} He will stay about ${PYR_STAY} turns, and Epirus sends him no fresh men: every battle costs him for good.`,s.id);
+    return;}
+  const king=ALLN.some(x=>G.s[x.id].units.some(u=>u.type==='ep_pyrrhus'));
+  if(G.turn-P.t>=PYR_STAY||!king){P.done=1;let n=0;
+    for(const x of ALLN){const s=G.s[x.id],k=s.units.filter(u=>u.pyr);n+=k.length;if(k.length)s.units=s.units.filter(u=>!u.pyr);}
+    G.orders=G.orders.filter(o=>ALLN.some(x=>G.s[x.id].units.some(u=>o.uids.includes(u.uid))));
+    report('⛵',!king?(n?`With their king fallen, the ${n} Epirote unit${n>1?'s':''} left in Italy take ship for home.`:'Pyrrhus is dead and his army destroyed. Epirus will send no more men to Italy.')
+      :n?`Pyrrhus sails home to Epirus with what is left of his army (${n} unit${n>1?'s':''}). "Another such victory and we are undone."`:'The army of Pyrrhus is gone, and the king sails home to Epirus.');}
+}
 
 /* ================= GEOGRAPHY ================= */
 const LAND=[
@@ -1235,7 +1344,7 @@ function renderTop(){
   const yr=280-Math.floor((G.turn-1)/2),season=G.turn%2?'Summer':'Winter';
   $('#tbDate').textContent=`${season}, ${yr} BC`;
   const own=ownedBy(PLAYER);
-  $('#tbSub').textContent=`Turn ${G.turn} · ${own.length} of ${NODES.length} cities`;
+  $('#tbSub').textContent=`Turn ${G.turn} · ${own.length} of ${NODES.length} cities${G.coal?G.coal.f===PLAYER?' · 🤝 All against you':` · 🤝 All against ${FACTIONS[G.coal.f].name}`:''}`;
   $('#tbGold').textContent=fmt(G.gold[PLAYER])+' ◉';
   const net=netIncome(PLAYER),el=$('#tbInc');el.textContent=(net>=0?'+':'')+fmt(net)+' per turn';el.className=net<0?'neg':'';
   $('#btnUndo').classList.toggle('hidden',!UI.undo.length);
@@ -1251,7 +1360,7 @@ function closeSheet(){UI.sel=null;$('#sheet').classList.add('hidden');renderNode
 function unitCard(u,fid,opt={}){
   const T=UNITS[u.type],pct=Math.round(100*u.men/T.men);
   const cls=['ucard',opt.pick?'pick':'',opt.dim?'dim':''].join(' ');
-  return`<button class="${cls}" data-uid="${u.uid}" ${opt.disabled?'disabled':''}>${symSvg(T.kind,FACTIONS[fid].color,36)}<div class="main"><div class="uname">${T.name} ${xpStars(u.xp)}</div><div class="umeta">${u.men}/${T.men} · ${opt.tag||KIND_NAME[T.kind]}</div><div class="ubar"><i style="width:${pct}%;background:${pct<40?'var(--bad)':pct<75?'var(--warn)':'var(--good)'}"></i></div></div></button>`;
+  return`<button class="${cls}" data-uid="${u.uid}" ${opt.disabled?'disabled':''}>${symSvg(T.kind,FACTIONS[fid].color,36)}<div class="main"><div class="uname">${T.name} ${xpStars(u.xp)}</div><div class="umeta">${u.men}/${T.men} · ${opt.tag||KIND_NAME[T.kind]+(isMerc(u.type)?" · hired":u.pyr?" · Epirote":"")}</div><div class="ubar"><i style="width:${pct}%;background:${pct<40?'var(--bad)':pct<75?'var(--warn)':'var(--good)'}"></i></div></div></button>`;
 }
 function renderPassSheet(s){
   s=seen(s);const n=NODE[s.id],held=s.units.length>0,mine=held&&s.owner===PLAYER,F=s.owner&&(held||s.bld.walls)?FACTIONS[s.owner]:null,fort=s.bld.walls;
@@ -1282,7 +1391,7 @@ function renderPassSheet(s){
   const all=$('#pkAll');if(all)all.onclick=()=>{const av=s.units.filter(u=>!u.moved);UI.pick=UI.pick.size===av.length?new Set():new Set(av.map(u=>u.uid));renderSheet();};
   const mar=$('#pkMarch');if(mar)mar.onclick=()=>startMove(s.id,[...UI.pick]);
   const dis=$('#pkDis');if(dis)dis.onclick=async()=>{const uid=[...UI.pick][0],u=s.units.find(x=>x.uid===uid);if(!u)return;
-    const ok=await modal({title:'Disband unit?',body:`<p>${UNITS[u.type].name} will be sent home. You save ${UNITS[u.type].upk} gold upkeep per turn.</p>`,buttons:[{label:'Disband',value:1,cls:'primary'},{label:'Keep',value:0}]});
+    const ok=await modal({title:'Disband unit?',body:`<p>${UNITS[u.type].name} will be sent home. You save ${unitUpk(u.type,PLAYER)} gold upkeep per turn.</p>`,buttons:[{label:'Disband',value:1,cls:'primary'},{label:'Keep',value:0}]});
     if(ok){s.units=s.units.filter(x=>x!==u);UI.pick.delete(uid);save();render();}};
   const fb=sh.querySelector('[data-fort]');if(fb)fb.onclick=()=>doFort(s);
   const ab=sh.querySelector('[data-amb]');if(ab)ab.onclick=()=>{s.amb=s.amb?null:true;UI.undo=[];AU.ui('select');toast(s.amb?`Your army at ${sname(s)} lies hidden beside the road`:`Your army at ${sname(s)} stands in the open`);save();render();};
@@ -1296,7 +1405,7 @@ function renderSheet(){
   const s=G.s[UI.sel];if(!s)return closeSheet();
   if(s.pass)return renderPassSheet(s);
   const F=FACTIONS[s.owner],mine=s.owner===PLAYER,o=order(s);
-  let h=`<div class="sh-head"><div class="sh-flag" style="background:${F.color}"></div><div><h3>${sname(s)}</h3><div class="sh-sub">${F.name} · ${tierName(s)} of ${fmt(s.pop)}${resOf(s).name?` · ${resOf(s).ico} ${resOf(s).name}`:''}${s.wonder?` · ${WONDERS[s.wonder].ico} ${WONDERS[s.wonder].name}`:''}</div></div><button class="sh-x" id="shX" aria-label="Close">×</button></div>`;
+  let h=`<div class="sh-head"><div class="sh-flag" style="background:${F.color}"></div><div><h3>${sname(s)}</h3><div class="sh-sub">${F.name}${s.colony?' colony':''} · ${tierName(s)} of ${fmt(s.pop)}${resOf(s).name?` · ${resOf(s).ico} ${resOf(s).name}`:''}${s.wonder?` · ${WONDERS[s.wonder].ico} ${WONDERS[s.wonder].name}`:''}</div></div><button class="sh-x" id="shX" aria-label="Close">×</button></div>`;
   if(mine){
     const g=growth(s),d=dangerTo(s);
     h+=`<div class="chips"><span class="chip">Income <b>+${fmt(income(s))}</b></span><span class="chip ${o<40?'bad':o>=80?'good':''}">Order <b>${o}%</b></span><span class="chip">Growth <b>${g>=0?'+':''}${g.toFixed(1)}%</b></span>${s.bld.walls?`<span class="chip">${BUILD.walls.lv[s.bld.walls-1]}</span>`:''}${d?`<span class="chip bad">⚠️ Threatened from ${NODE[d.from].name}</span>`:''}</div>`;
@@ -1328,13 +1437,14 @@ function renderSheet(){
   const all=$('#pkAll');if(all)all.onclick=()=>{const av=s.units.filter(u=>!u.moved);UI.pick=UI.pick.size===av.length?new Set():new Set(av.map(u=>u.uid));renderSheet();};
   const mar=$('#pkMarch');if(mar)mar.onclick=()=>startMove(s.id,[...UI.pick]);
   const dis=$('#pkDis');if(dis)dis.onclick=async()=>{const uid=[...UI.pick][0],u=s.units.find(x=>x.uid===uid);if(!u)return;
-    const ok=await modal({title:'Disband unit?',body:`<p>${UNITS[u.type].name} will be sent home. You save ${UNITS[u.type].upk} gold upkeep per turn.</p>`,buttons:[{label:'Disband',value:1,cls:'primary'},{label:'Keep',value:0}]});
+    const ok=await modal({title:'Disband unit?',body:`<p>${UNITS[u.type].name} will be sent home. You save ${unitUpk(u.type,PLAYER)} gold upkeep per turn.</p>`,buttons:[{label:'Disband',value:1,cls:'primary'},{label:'Keep',value:0}]});
     if(ok){s.units=s.units.filter(x=>x!==u);UI.pick.delete(uid);save();render();}};
   sh.querySelectorAll('[data-build]').forEach(b=>b.onclick=()=>doBuild(s,b.dataset.build));
   sh.querySelectorAll('[data-road]').forEach(b=>b.onclick=()=>addProject(s,{k:'road',to:b.dataset.road}));
   sh.querySelectorAll('[data-wonder]').forEach(b=>b.onclick=()=>addProject(s,{k:'wonder',w:b.dataset.wonder}));
   sh.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>cancelBuild(s,+b.dataset.cancel));
   sh.querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>doRecruit(s,b.dataset.rec));
+  sh.querySelectorAll('[data-merc]').forEach(b=>b.onclick=()=>doHire(s,b.dataset.merc));
   sh.querySelectorAll('[data-tax]').forEach(b=>b.onclick=()=>{s.tax=+b.dataset.tax;save();render();});
   sh.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>stopOrder(+b.dataset.stop));
   sh.querySelectorAll('[data-lift]').forEach(b=>b.onclick=()=>liftSiege(+b.dataset.lift));
@@ -1353,7 +1463,7 @@ const armyTag=u=>{const o=G.orders.find(o=>o.uids.includes(u.uid)),q=G.sieges.fi
 const turnsTxt=n=>`${n} turn${n>1?'s':''}`;
 function tabBuild(s){
   const n=(s.build?1:0)+s.queue.length,full=n>=BUILD_MAX,gold=G.gold[PLAYER];
-  let h=`<div class="note">A ${tierName(s).toLowerCase()} can build up to level ${tier(s)}.${nextTierTxt(s)}${hasRes(s,'timber')?' 🌲 Timber from its forests makes building here 20% cheaper.':''}</div>`;
+  let h=`<div class="note">A ${tierName(s).toLowerCase()} can build up to level ${tier(s)}.${nextTierTxt(s)}${hasRes(s,'timber')?' 🌲 Timber from its forests makes building here 20% cheaper.':''}${s.owner==='etruria'?` ${PERK.etruria.ico} Etruscan craftsmen build 15% cheaper, and pave roads for a quarter less.`:''}</div>`;
   if(s.build){ // the project under way, then the queue behind it, each with the turn it will be done
     const row=(i,p,d)=>`<div class="row q"><div class="ico">${projIco(p)}</div><div class="main"><div class="t">${projName(s,p)}</div><div class="d">${d}</div></div><button class="qx" data-cancel="${i}" aria-label="Cancel ${projName(s,p)}">✕</button></div>`;
     let at=s.build.t;
@@ -1404,13 +1514,25 @@ function tabRecruit(s){
     const stats=`ATK ${T.atk} · DEF ${T.def} · MOR ${T.mor} · ${T.men} men${T.rng?` · range ${T.rng}`:''}`;
     const dis=!ok||s.rec>=2||s.units.length>=MAX_UNITS||G.gold[PLAYER]<cost||(t==='general'&&countGenerals(PLAYER)>=3);
     h+=`<div class="row"><div class="ico">${symSvg(T.kind,FACTIONS[PLAYER].color,34)}</div><div class="main"><div class="t">${T.name}</div><div class="d">${stats}</div><div class="d">${fmt(cost)} gold${cost<T.cost?` <s>${fmt(T.cost)}</s>`:''} · upkeep ${T.upk}${req?` · <span class="neg">${req}</span>`:''}${t==='general'?' · capital only, max 3':''}</div></div><button class="btn gold sm" data-rec="${t}" ${dis?'disabled':''}>Recruit</button></div>`;}
+  return h+tabMerc(s);
+}
+function tabMerc(s){ // the region's hired swords
+  const r=MERC_OF[s.id];if(!r)return'';const R=MERC[r],p=G.merc[r],sg=besieged(s);
+  let h=`<div class="qcap">Mercenaries of ${R.name}</div><div class="note">Seasoned men for hire (${xpStars(1)}): they need no barracks, don't count toward the 2 recruits a turn, and can march at once — but they cost more to keep, and they are the first to walk off if the treasury runs dry. Each region's pool refills slowly.${PLAYER==='carthage'?` ${PERK.carthage.ico} Carthage pays a quarter less to hire and keep them.`:''}${sg?' <span class="neg">No one comes to a besieged city.</span>':''}</div>`;
+  for(const t in R.pool){const T=UNITS[t],n=p[t]||0,cost=mercCost(t,PLAYER),upk=unitUpk(t,PLAYER);
+    const stats=`ATK ${T.atk} · DEF ${T.def} · MOR ${T.mor} · ${T.men} men${T.rng?` · range ${T.rng}`:''}`;
+    h+=`<div class="row"><div class="ico">${symSvg(T.kind,FACTIONS[PLAYER].color,34)}</div><div class="main"><div class="t">${T.name} <span class="pool">${n} of ${R.pool[t]} for hire</span></div><div class="d">${stats}</div><div class="d">${fmt(cost)} gold${cost<T.cost?` <s>${fmt(T.cost)}</s>`:''} · upkeep ${upk}</div></div><button class="btn gold sm" data-merc="${t}" ${canHire(s,t)?'':'disabled'}>Hire</button></div>`;}
   return h;
 }
+function doHire(s,t){const T=UNITS[t];
+  if(s.units.length>=MAX_UNITS)return toast('This city holds at most 12 units');if(G.gold[PLAYER]<mercCost(t,PLAYER))return toast('Not enough gold');
+  const u=hireMerc(s,t);if(!u)return toast('None left to hire here');UI.pick.add(u.uid);
+  toast(`${T.name} hired in ${sname(s)} — ready to march`);AU.ui('recruit');save();render();}
 function tabGovern(s){
-  const ip=incomeParts(s),up=upkeepOf(s.units),r=resOf(s),li=(k,v)=>v?`<tr><td>${k}</td><td>${fmt(v)}</td></tr>`:'';
+  const ip=incomeParts(s),up=upkeepOf(s.units,PLAYER),r=resOf(s),li=(k,v)=>v?`<tr><td>${k}</td><td>${fmt(v)}</td></tr>`:'';
   let h=`<div class="note">Tax rate</div><div class="seg">${TAX.map((t,i)=>`<button data-tax="${i}" class="${s.tax===i?'on':''}">${t}</button>`).join('')}</div>`;
   if(r.name)h+=`<div class="row"><div class="ico">${r.ico}</div><div class="main"><div class="t">Local goods: ${r.name}</div><div class="d">${r.eff}</div></div></div>`;
-  h+=`<table class="ledger"><caption>City income per turn</caption><tr><td>Base</td><td>${fmt(ip.base)}</td></tr><tr><td>Taxes (${TAX[s.tax].toLowerCase()})</td><td>${fmt(ip.tax)}</td></tr>${li('Market bonus',ip.mkt)}${li(templeName(s),ip.god)}${li(r.name,ip.res)}${li('Trade by road',ip.road)}${li('Great Harbour',ip.won)}${ip.pen?`<tr><td>Unrest penalty</td><td class="neg">${fmt(ip.pen)}</td></tr>`:''}<tr><td>Upkeep of troops here</td><td class="neg">−${fmt(up)}</td></tr><tr class="tot"><td>Net from ${sname(s)}</td><td class="${ip.total-up<0?'neg':'pos'}">${fmt(ip.total-up)}</td></tr></table>`;
+  h+=`<table class="ledger"><caption>City income per turn</caption><tr><td>Base</td><td>${fmt(ip.base)}</td></tr><tr><td>Taxes (${TAX[s.tax].toLowerCase()})</td><td>${fmt(ip.tax)}</td></tr>${li('Market bonus',ip.mkt)}${li(templeName(s),ip.god)}${li(r.name,ip.res)}${li('Trade by road',ip.road)}${li('Sea trade',ip.sea)}${li('Great Harbour',ip.won)}${ip.pen?`<tr><td>Unrest penalty</td><td class="neg">${fmt(ip.pen)}</td></tr>`:''}<tr><td>Upkeep of troops here</td><td class="neg">−${fmt(up)}</td></tr><tr class="tot"><td>Net from ${sname(s)}</td><td class="${ip.total-up<0?'neg':'pos'}">${fmt(ip.total-up)}</td></tr></table>`;
   h+=`<table class="ledger"><caption>Public order (below 40% hurts income; below 20% risks revolt)</caption>${orderParts(s).filter(p=>p[1]).map(([k,v])=>`<tr><td>${k}</td><td class="${v<0?'neg':''}">${v>0?'+':''}${v}</td></tr>`).join('')}<tr class="tot"><td>Order</td><td>${order(s)}%</td></tr></table>`;
   const g=growth(s);
   h+=`<table class="ledger"><caption>Growth per turn${tier(s)<3?` (next size at ${fmt(TIER_POP[tier(s)-1])} people)`:''}</caption>${growthParts(s).filter(p=>p[1]).map(([k,v])=>`<tr><td>${k}</td><td class="${v<0?'neg':''}">${v>0?'+':''}${v.toFixed(1)}%</td></tr>`).join('')}${order(s)<40?'<tr><td>Unrest (order below 40%)</td><td class="neg">no growth</td></tr>':''}<tr class="tot"><td>Growth</td><td>${g>=0?'+':''}${g.toFixed(1)}%</td></tr></table>`;
@@ -1420,7 +1542,8 @@ function tabGovern(s){
 /* Building queue: a city works on one project at a time (build), with more lined up behind it (queue). A project is a building level {k, lv}, a paved road {k:'road', to} or a wonder {k:'wonder', w}; c is the gold paid, t the turns left on the one under way. Gold is paid when a project is queued; the next one starts the turn the last is finished. */
 const BUILD_MAX=5; // projects a city can have lined up, the one under way included
 const plannedLv=(s,k)=>s.bld[k]+(s.build&&s.build.k===k?1:0)+s.queue.filter(q=>q.k===k).length; // the level a building reaches once everything lined up is done
-const projCost=(s,p)=>{const c=p.k==='road'?roadCost(s.id,p.to):p.k==='wonder'?WONDER_COST:BUILD[p.k].cost[p.lv];return hasRes(s,'timber')?Math.round(c*.8/10)*10:c;};
+const projCost=(s,p)=>{const c=(p.k==='road'?roadCost(s.id,p.to):p.k==='wonder'?WONDER_COST:BUILD[p.k].cost[p.lv])*(s.owner==='etruria'?p.k==='road'?.75:.85:1); // Etruscan craftsmen build cheaper
+  return Math.round(c*(hasRes(s,'timber')?.8:1)/10)*10;};
 const projTurns=(s,p)=>p.k==='road'?roadTurns(s.id,p.to):p.k==='wonder'?WONDER_TURNS:BUILD[p.k].turns[p.lv];
 const projName=(s,p)=>p.k==='road'?`Paved road to ${NODE[p.to].name}`:p.k==='wonder'?WONDERS[p.w].name:lvName(s,p.k,p.lv);
 const projIco=p=>p.k==='road'?'🛣️':p.k==='wonder'?WONDERS[p.w].ico:BUILD[p.k].ico;
@@ -1629,8 +1752,8 @@ const unitOwner=new WeakMap();
 function ownerOfUnit(u){if(unitOwner.has(u))return unitOwner.get(u);for(const n of ALLN)if(G.s[n.id].units.includes(u))return G.s[n.id].owner;return PLAYER;}
 
 /* ================= BATTLE RESOLUTION ================= */
-function autoResolve(att,def,walls,dk=1){ // dk: the defenders' edge (an ambush)
-  const A=armyPower(att)*rnd(.8,1.2),D=armyPower(def)*(1+.15*walls)*dk*rnd(.8,1.2),aw=A>D,r=Math.min(A,D)/Math.max(A,D,1);
+function autoResolve(att,def,walls,dk=1,ak=1){ // dk, ak: the defenders' and attackers' edge (an ambush, Samnites in the hills)
+  const A=armyPower(att)*ak*rnd(.8,1.2),D=armyPower(def)*(1+.15*walls)*dk*rnd(.8,1.2),aw=A>D,r=Math.min(A,D)/Math.max(A,D,1);
   const wl=.05+.4*r*r,ll=.45+.35*r;
   const hit=(us,f)=>{for(const u of us){const mx=UNITS[u.type].men;u.men=Math.max(0,Math.round(u.men*(1-clamp(f*rnd(.7,1.3),0,1))));if(u.men<mx*.12)u.men=0;}};
   hit(att,aw?wl:ll);hit(def,aw?ll:wl);
@@ -1642,7 +1765,8 @@ async function doBattle(o){
   const rel=reliefFor(to,defFid,from),relUnits=rel.flatMap(r=>r.units),defAll=defUnits.concat(relUnits); // relief armies fight beside the garrison
   units.forEach(u=>unitOwner.set(u,attFid));defAll.forEach(u=>unitOwner.set(u,defFid));
   const pInv=attFid===PLAYER||defFid===PLAYER,pAtt=attFid===PLAYER;let mode=o.mode;
-  const preA=sumMen(units),preD=sumMen(defAll),amb=!!o.ambush,ak=amb?1.3:1,powA=armyPower(units),powD=armyPower(defAll)*(1+.15*to.bld.walls)*ak; // the odds, for grading the result
+  const mt=f=>f==='samnium'&&roughLand(to)?MTN_K:1; // Samnites in their element
+  const preA=sumMen(units),preD=sumMen(defAll),amb=!!o.ambush,ak=(amb?1.3:1)*mt(defFid),aa=mt(attFid),powA=armyPower(units)*aa,powD=armyPower(defAll)*(1+.15*to.bld.walls)*ak; // the odds, for grading the result
   const q=!to.pass?siegeOf(to.id,attFid):null,kit=siegeKit(q&&q.from===from.id?q:null),wE=to.bld.walls*(kit.ramK===1?.5:1); // a prepared siege halves what the walls are worth
   if(pInv&&!mode){
     AU.ui('alarm');const st=amb?(pAtt?{t:`Ambush at ${sname(to)}!`,p:`<p>As your army marches through ${sname(to)}, the ${FACTIONS[defFid].adj} army that lay hidden there falls on it from both sides of the road.</p>`,b:'⚔ Fight your way out'}:{t:`Your ambush at ${sname(to)}!`,p:`<p>The ${FACTIONS[attFid].adj} army from ${sname(from)} marches straight into the men you hid at ${sname(to)}.</p>`,b:'⚔ Spring the ambush'})
@@ -1656,13 +1780,15 @@ async function doBattle(o){
     const res=await runBattle({title:`${to.pass?'Battle at':'Battle of'} ${sname(to)}`,playerIsAttacker:pAtt,pUnits:pAtt?units:defUnits,eUnits:pAtt?defUnits:units,eFid:pAtt?defFid:attFid,walls:to.bld.walls,
       field:!!to.pass&&!to.bld.walls,fort:!!to.pass&&!!to.bld.walls,land:to.pass?NODE[to.id].land:null,pRelief:pAtt?[]:relArr,eRelief:pAtt?relArr:[],ambush:amb,...kit});
     if(res)attWon=pAtt?res.winnerSide===0:res.winnerSide===1;
-    else{mode='auto';attWon=autoResolve(units,defAll,wE,ak);}
-  }else attWon=autoResolve(units,defAll,wE,ak);
+    else{mode='auto';attWon=autoResolve(units,defAll,wE,ak,aa);}
+  }else attWon=autoResolve(units,defAll,wE,ak,aa);
   if(amb)to.amb=null; // sprung: everyone knows where they are now
   const attAlive=units.filter(u=>u.men>0),defAlive=defUnits.filter(u=>u.men>0);
   if(attWon&&!attAlive.length)attWon=false;
   const lostA=preA-sumMen(attAlive),lostD=preD-sumMen(defAll.filter(u=>u.men>0));
   for(const r of rel){r.src.units=r.src.units.filter(u=>u.men>0);r.units.forEach(u=>{if(u.men>0)u.moved=true;});} // the dead are struck from their rolls; the rest go back to their posts spent
+  const wf=attWon?attFid:defFid,plunder=wf==='gauls'?2*(attWon?lostD:lostA):0; // Gallic warbands strip the fallen
+  if(plunder){G.gold.gauls+=plunder;if(PLAYER==='gauls')toast(`${PERK.gauls.ico} Plunder from the fallen: +${fmt(plunder)} gold`),report(PERK.gauls.ico,`Your warriors stripped the fallen at ${sname(to)}: +${fmt(plunder)} gold in plunder.`,to.id);}
   if(pInv&&mode==='auto'){
     const won=pAtt?attWon:!attWon;AU.stinger(won?'victory':'defeat');
     const gr=pAtt?battleGrade(won,preA,lostA,preD,lostD,powA/Math.max(1,powD)):battleGrade(won,preD,lostD,preA,lostA,powD/Math.max(1,powA));
@@ -1695,18 +1821,19 @@ function takePass(to,fid,units,from){ // an army wins a pass or fort, or walks i
 async function capture(to,fid,units,from){
   if(to.pass)return takePass(to,fid,units,from);
   const prev=to.owner,back=dropQueue(to);if(fid===PLAYER)AU.ui('fanfare');
-  to.owner=fid;to.tax=1;to.unrest=30;to.rec=0;
+  to.owner=fid;to.tax=1;to.unrest=30;to.rec=0;to.colony=null;
   const fit=units.slice(0,MAX_UNITS);fit.forEach(u=>u.moved=true);to.units=fit;
   if(units.length>MAX_UNITS&&from&&from.owner===fid)from.units.push(...units.slice(MAX_UNITS));
   if(prev!=='rebels'&&G.cap[prev]===to.id){const own=ownedBy(prev);G.cap[prev]=own.length?own.sort((a,b)=>b.pop-a.pop)[0].id:null;}
   repaintTerritory();renderNodes();
   if(fid===PLAYER){
-    const loot=Math.round(to.pop*.12),occ=Math.round(to.pop*.03);
-    const W=to.wonder&&WONDERS[to.wonder],ch=await modal({title:`${sname(to)} is ours`,body:`<p>Your troops hold ${sname(to)}. How should they treat the city?</p>${W?`<p>${W.ico} <b>The ${W.name} is yours now.</b> ${W.eff}.</p>`:''}`,
-      buttons:[{label:`Occupy · +${fmt(occ)} gold, people stay calm`,value:'occ',cls:'gold'},{label:`Sack · +${fmt(loot)} gold, lose ¼ of the people`,value:'sack',cls:'ghost'}]});
-    if(ch==='sack'){G.gold[PLAYER]+=loot;to.pop=Math.round(to.pop*.75);to.unrest=45;}else G.gold[PLAYER]+=occ;
+    const loot=Math.round(to.pop*.12*(fid==='gauls'?2:1)),occ=Math.round(to.pop*.03),col=canColony(to,fid); // Gallic warbands strip a city bare
+    const W=to.wonder&&WONDERS[to.wonder],ch=await modal({title:`${sname(to)} is ours`,body:`<p>Your troops hold ${sname(to)}. How should they treat the city?</p>${W?`<p>${W.ico} <b>The ${W.name} is yours now.</b> ${W.eff}.</p>`:''}${fid==='rome'?`<p>${PERK.rome.ico} A colony costs ${COLONY_COST} gold and ${COLONISTS} settlers from Roma: no unrest from the conquest, and +10 public order for good.${col?'':` <span class="neg">${G.s.roma.owner!=='rome'?'Roma is not yours.':G.s.roma.pop<3000+COLONISTS?'Roma has too few people to spare.':'Not enough gold.'}</span>`}</p>`:''}`,
+      buttons:[...(col?[{label:`${PERK.rome.ico} Found a colony · −${COLONY_COST} gold, +${COLONISTS} settlers`,value:'col',cls:'gold'}]:[]),{label:`Occupy · +${fmt(occ)} gold, people stay calm`,value:'occ',cls:col?'ghost':'gold'},{label:`Sack · +${fmt(loot)} gold, lose ¼ of the people`,value:'sack',cls:'ghost'}]});
+    if(ch==='sack'){G.gold[PLAYER]+=loot;to.pop=Math.round(to.pop*.75);to.unrest=45;}else if(ch==='col')settleColony(to);else G.gold[PLAYER]+=occ;
   }else{
-    G.gold[fid]+=Math.round(to.pop*.04);
+    G.gold[fid]+=Math.round(to.pop*.04*(fid==='gauls'?2:1));if(fid==='gauls')to.pop=Math.round(to.pop*.9); // the AI's Gauls plunder as they go
+    if(canColony(to,fid)&&G.gold[fid]>=COLONY_COST+50)settleColony(to); // Rome plants a colony when it can spare the gold
     if(prev===PLAYER)report('🔥',`${theF(fid,1)} captured ${sname(to)}!${to.wonder?` The ${WONDERS[to.wonder].name} is theirs now.`:''}${back?` The ${fmt(back)} gold set aside for its building queue was returned.`:''}`,to.id);
     else report('⚑',`${theF(fid,1)} took ${sname(to)} from ${prev==='rebels'?'its free people':theF(prev)}.`,to.id);
   }
@@ -1885,6 +2012,7 @@ function mkBU(cu,side,fid){
   for(let i=0;i<n;i++)u.figs.push({u,alive:true,fled:false,fall:0,x:0,z:0,y:0,yaw:u.face,ph:Math.random()*6.28,jx:(Math.random()-.5)*.35,jz:(Math.random()-.5)*.35,mi:0,key:null,
     sc:.94+Math.random()*.12,wp:Math.random()*6.28,wa:0,g:0,sw:-1,swk:null,wait:0,cd:Math.random()*1.5,foe:null,hit:0,kv:0,kx:0,kz:0,die:null,roll:1,air:false,ay:0,vx:0,vy:0,vz:0});
   u.alive=u.figs.slice();u.dm=dims(u);u.wk=WEAP(u);u.pila=abilsOf(u).includes('pila'); // pila fly by themselves unless held back
+  u.mtn=fid==='samnium'&&ROUGH.includes(B.land)?1:0;if(u.mtn)u.mor+=10; // Samnites at home in the mountains
   return u;
 }
 function mkRelief(r,side,fid){ // a relief army starts off the field, unseen, and walks on at r.delay seconds
@@ -1960,12 +2088,12 @@ function terrMul(u,x,z){
 /* ================= BATTLE: COMBAT ================= */
 function meleeDmg(a,d){ // men-equivalents per second
   const Ta=a.T,Td=d.T,ang=flankAng(d,a),dSpear=d.kind==='spear'&&d.state!=='rout'&&ang<1.05;
-  let p=Ta.atk+a.xp-FAT_P[fatLv(a)]+(a.cry>B.time?4:0)+(a.form==='testudo'?-4:a.form==='phalanx'&&flankAng(a,d)<1.05?2:0);if(a.state==='waver')p-=2;
+  let p=Ta.atk+a.xp+a.mtn*2-FAT_P[fatLv(a)]+(a.cry>B.time?4:0)+(a.form==='testudo'?-4:a.form==='phalanx'&&flankAng(a,d)<1.05?2:0);if(a.state==='waver')p-=2;
   const dh=heightAt(a.x,a.z)-heightAt(d.x,d.z);if(dh>1.5)p+=2;else if(dh<-1.5)p-=1;
   if(a.chargeT[d.uid]>0&&Ta.charge&&!dSpear)p+=(Ta.charge+(a.form==='wedge'?4:0))*B.wx.chg; // mud takes the weight out of a charge
   if(big(a)&&dSpear)p-=2;if(a.kind==='spear'&&big(d))p+=5;if(isCav(a)&&d.kind==='missile')p+=3;if(big(a)&&forestAt(a.x,a.z))p-=3;
   p+=ang>2.3?5:ang>1.05?3:0;
-  let ar=Td.def+d.xp-FAT_P[fatLv(d)]+(d.form==='phalanx'&&ang<1.05?6:d.form==='testudo'?2:d.form==='wedge'||d.form==='loose'?-3:0);if(forestAt(d.x,d.z))ar+=big(d)?-3:2;
+  let ar=Td.def+d.xp+d.mtn-FAT_P[fatLv(d)]+(d.form==='phalanx'&&ang<1.05?6:d.form==='testudo'?2:d.form==='wedge'||d.form==='loose'?-3:0);if(forestAt(d.x,d.z))ar+=big(d)?-3:2;
   if(d.side===B.defSide&&inTown(d))ar+=B.townBonus;if(dSpear&&big(a))ar+=5;if(d.state==='waver')ar-=1;
   ar*=ang>2.3?.6:ang>1.05?.8:1;if(d.state==='rout')ar*=.4;
   p=Math.max(1,p);ar=Math.max(1,ar);
@@ -2444,10 +2572,18 @@ const KIT={
   gr_cav:{body:'bronze',helm:'attic',pl:0xece6d4,shield:'none'},gr_armored:{body:'bronze',pl:0xece6d4,em:0xf2c94c},
   ca_sling:{body:'tunic',helm:'bare'},ca_libyan:{shield:'round'},ca_iber:{body:'tunic'},ca_numid:{body:'tunic',helm:'bare'},
   ca_sacred:{body:'bronze',helm:'attic',pl:0xece6d4,shield:'round',cloak:1},
-  rb_mil:{},rb_spear:{shield:'round'},rb_sling:{helm:'bare'},rb_merc:{body:'mail',helm:'crest',pl:0x2b2b2b}
+  rb_mil:{},rb_spear:{shield:'round'},rb_sling:{helm:'bare'},rb_merc:{body:'mail',helm:'crest',pl:0x2b2b2b},
+  // hired men keep the dress of their own people, whoever pays them
+  mc_gaul:{body:'mail',legs:'trousers',helm:'hair',shield:'oval'},mc_ligur:{body:'tunic',legs:'boots',helm:'bare',shield:'small'},mc_umbr:{body:'linen',legs:'greaves',helm:'pilos',shield:'round'},
+  mc_samn:{body:'disc',legs:'greaves',helm:'plume',shield:'scutum',pl:0xece6d4},mc_campan:{body:'bronze',legs:'greaves',helm:'attic',shield:'round',pl:0xece6d4},
+  mc_hop:{body:'linen',legs:'greaves',helm:'corinth',shield:'round',pl:0x2b2b2b},mc_rhod:{body:'tunic',legs:'bare',helm:'bare',shield:'none'},mc_tarent:{body:'tunic',legs:'bare',helm:'pilos',shield:'small'},
+  mc_mamert:{body:'mail',legs:'greaves',helm:'crest',shield:'scutum',pl:0x2b2b2b},mc_sicel:{body:'tunic',legs:'boots',helm:'bare',shield:'small'},
+  mc_numid:{body:'tunic',legs:'bare',helm:'bare',shield:'small'},mc_iber:{body:'tunic',legs:'bare',helm:'cap',shield:'scutum'},mc_gaetul:{body:'tunic',legs:'bare',helm:'bare',shield:'small'},
+  ep_pyrrhus:{body:'bronze',legs:'greaves',helm:'attic',shield:'round',cloak:1,pl:0xe0b840,em:0xf2c94c},ep_phalanx:{body:'linen',legs:'greaves',helm:'attic',shield:'small',pl:0xece6d4},
+  ep_hyp:{body:'bronze',legs:'greaves',helm:'attic',shield:'round',pl:0x8c1c14},ep_cav:{body:'bronze',legs:'boots',helm:'attic',shield:'none',pl:0xece6d4},ep_eleph:{}
 };
 const MAIL=0x7e8288,LINEN=0xe4dac0,HAIR=0x3b2a1a;
-const HORSE_C={general:0xd9d2c3,ga_noble:0x2e2420,ca_numid:0x8a6440,gr_cav:0x7a7068,et_cav:0x5a3d28,rm_eqleg:0x3e2c1f};
+const HORSE_C={general:0xd9d2c3,ep_pyrrhus:0xece6d4,ep_cav:0x4a3526,mc_numid:0x8a6440,mc_campan:0x5a3d28,ga_noble:0x2e2420,ca_numid:0x8a6440,gr_cav:0x7a7068,et_cav:0x5a3d28,rm_eqleg:0x3e2c1f};
 const kitOf=(fid,type)=>Object.assign({body:'tunic',legs:'bare',helm:'cap',shield:'oval',pl:0x8c1c14,em:EMB[fid],cloak:0},KIT0[fid],KIT[type]);
 const dome=(c,y,r=.17)=>prt(new THREE.SphereGeometry(r,6,3,0,Math.PI*2,0,Math.PI/2),c,{y});
 function headParts(k,y,neu,det){
@@ -4001,7 +4137,7 @@ const ARM_ORD={inf:0,spear:0,missile:1,cav:2,eleph:2,gen:3};
 function cmArmyGeo(fid,types){
   const ord=types.slice(0,9).sort((a,b)=>ARM_ORD[UNITS[a].kind]-ARM_ORD[UNITS[b].kind]),n=ord.length,cols=n<=2?n:3,rows=Math.ceil(n/cols),SX=4.6,SZ=5.4,items=[];
   ord.forEach((t,i)=>{const r=Math.floor(i/cols),c=i%cols,rowN=r===rows-1?n-r*cols:cols;items.push({g:cmFigGeo(fid,t),x:(c-(rowN-1)/2)*SX,z:((rows-1)/2-r)*SZ,s:3});});
-  items.push({g:cmBannerGeo(fid,types.includes('general')),x:-(cols*SX)/2-2.2,z:0,s:1.9});
+  items.push({g:cmBannerGeo(fid,types.some(t=>UNITS[t].kind==='gen')),x:-(cols*SX)/2-2.2,z:0,s:1.9});
   return cmJoin(items);
 }
 function cmSetArmy(c,fid,types,key){
@@ -4257,30 +4393,33 @@ function cmInit(){
 /* ================= CAMPAIGN AI ================= */
 function hostileDist(f){const d={},q=[];for(const n of NODES)if(G.s[n.id].owner!==f){d[n.id]=0;q.push(n.id);}
   while(q.length){const c=q.shift();for(const m of ADJ[c])if(d[m]===undefined){d[m]=d[c]+1;q.push(m);}}return d;}
-const threat=(s,f)=>moveTargets(s.id).map(id=>G.s[id]).filter(t=>t.owner&&t.owner!==f&&t.owner!=='rebels'&&(!t.pass||t.units.length)&&!ambFor(t,f)).reduce((a,t)=>a+armyPower(t.units),0);
+const threat=(s,f)=>moveTargets(s.id).map(id=>G.s[id]).filter(t=>t.owner&&t.owner!==f&&t.owner!=='rebels'&&(!t.pass||t.units.length)&&!ambFor(t,f)).reduce((a,t)=>a+armyPower(t.units)*(coalPeace(f,t.owner)?COAL_TRUST:1),0);
+const COAL_TRUST=.3; // how much of an ally's army next door a coalition member still guards against
+const aggrOf=(f,o)=>FACTIONS[f].aggr*(coalFoe(f,o)?1.25:1)*(f==='greeks'&&pyrOn()?1.25:1); // bolder against the common enemy, and with Pyrrhus at their side
 function desired(s,f,hd){if(G.cap[f]===s.id)return 7;if(hd[s.id]===1)return clamp(3+Math.round(threat(s,f)/300),3,9);return 1;}
 const AI_EDGE=1.4; // an AI attacks only with this much more power than the defenders (scaled by its aggression)
 const PICKET=.8,PICKET_MIN=.45; // an army camped on a pass toward a rival aims at this share of the rival's power next door, and isn't sent out below the smaller share
 const aiFront=(p,f)=>ADJ[p.id].some(id=>{const o=G.s[id].owner;return o!==f&&o!=='rebels';}); // a pass with a rival's city at one end of its road (free cities never attack)
 const rivalPower=t=>armyPower(t.units)*(t.owner===PLAYER?.9:FACTIONS[t.owner].aggr/AI_EDGE); // as aiNeed weighs a neighbour
 const reliefPower=(t,from)=>armyPower(reliefFor(t,t.owner,from).flatMap(r=>r.units)); // the armies next door that would march to t's aid
-const campFree=ps=>{const keep=ps.bld.walls?ps.units.slice().sort((a,b)=>unitPower(b)-unitPower(a)).slice(0,2):[];return ps.units.filter(u=>!u.moved&&!keep.includes(u));}; // a fort keeps its two best units at their post
+const campFree=ps=>{const keep=ps.bld.walls?ps.units.slice().sort((a,b)=>unitPower(b)-unitPower(a)).slice(0,2):[];return ps.units.filter(u=>!u.moved&&!u.pyr&&!keep.includes(u));}; // a fort keeps its two best units at their post; Pyrrhus's men follow only him
 function aiNeed(s,f,skip,deep=true,pf=.9){ // power a city of f should hold so that no hostile neighbour (other than skip) dares attack it
   let m=0;for(const id of moveTargets(s.id)){const t=G.s[id];if(id===skip||!t.owner||t.owner===f||t.owner==='rebels'||(t.pass&&!t.units.length)||ambFor(t,f))continue; // free cities never attack; an ambush is unseen
     let p=armyPower(t.units);
     if(t.owner===PLAYER)p*=pf; // pf: how much of the player's army next door we expect to come at us
     else{if(deep&&!t.pass)p=Math.max(p*.4,p-aiNeed(t,t.owner,s.id,false)); // it must keep a garrison against its other neighbours
-      p*=FACTIONS[t.owner].aggr/AI_EDGE;}
+      p*=aggrOf(t.owner,f)/AI_EDGE;if(coalPeace(f,t.owner))p*=COAL_TRUST;}
     if(!t.pass){const g=gateOn(s.id,id);if(g&&g.units.length&&g.owner===f)p=Math.max(p*.5,p-armyPower(g.units)*(1+.15*g.bld.walls));} // our army on the pass meets them first: it takes their weight off the city, up to half
     if(p>m)m=p;}
   return m/(1+.15*s.bld.walls)*(G.cap[f]===s.id?1.3:1.1);
 }
 function aiGoal(f){ // the enemy city f is massing against; kept for a while so its troops don't wander
   const mem=G.ai||(G.ai={});let g=mem[f];
-  const fine=id=>{const t=G.s[id];return t.owner!==f&&!(t.owner===PLAYER&&G.turn<4)&&ADJ[id].some(n=>G.s[n].owner===f);};
+  const fine=id=>{const t=G.s[id];return t.owner!==f&&!(t.owner===PLAYER&&G.turn<4)&&!coalPeace(f,t.owner)&&ADJ[id].some(n=>G.s[n].owner===f);};
+  if(G.coal&&g&&!coalFoe(f,G.s[g.t].owner)&&inCoal(f))g=null; // a new coalition: the old goal gives way to the common enemy
   if(!g||!fine(g.t)||G.turn-g.since>=8){let best=null,bs=0;
     for(const s of ownedBy(f))for(const id of ADJ[s.id]){const t=G.s[id];if(!fine(id))continue;
-      const sc=(2+t.pop/1500+(G.cap[t.owner]===id?2:0)+(t.owner===PLAYER?1:0))/(armyPower(t.units)*(1+.15*t.bld.walls)+150);
+      const sc=(2+t.pop/1500+(G.cap[t.owner]===id?2:0)+(t.owner===PLAYER?1:0))/(armyPower(t.units)*(1+.15*t.bld.walls)+150)*(coalFoe(f,t.owner)?2.5:1);
       if(sc>bs){bs=sc;best=id;}}
     g=mem[f]=best?{t:best,since:G.turn}:null;}
   if(!g)return null;
@@ -4289,7 +4428,7 @@ function aiGoal(f){ // the enemy city f is massing against; kept for a while so 
 }
 function aiFree(s,f,skip){ // ready units the city can spare; the weakest stay behind until the garrison is strong enough
   const sg=new Set((G.sieges||[]).filter(q=>q.from===s.id&&qf(q)===f).flatMap(q=>q.uids)); // besiegers stay at the siege
-  const av=s.units.filter(u=>!u.moved&&!sg.has(u.uid)).sort((a,b)=>unitPower(a)-unitPower(b)),keep=s.units.filter(u=>u.moved||sg.has(u.uid));
+  const av=s.units.filter(u=>!u.moved&&!sg.has(u.uid)&&!u.pyr).sort((a,b)=>unitPower(a)-unitPower(b)),keep=s.units.filter(u=>u.moved||sg.has(u.uid)||u.pyr);
   const need=aiNeed(s,f,skip),minN=G.cap[f]===s.id?2:1;
   while(av.length&&(keep.length<minN||armyPower(keep)<need))keep.push(av.shift());
   return av;
@@ -4301,7 +4440,7 @@ function aiForce(free,req){ // the fewest of the strongest units that reach the 
   return out;
 }
 function aiStrike(f,free,t,from,wf=1,rel=1){ // rel: how much of the relief next door counts (half, when it has to cut through siege lines) // the force f would send from `from` against t, or null if it wouldn't dare (the player's turn checklist asks the same question); wf: how much the walls count
-  const F=FACTIONS[f],dp=t.units.length?(armyPower(t.units)+(rel?reliefPower(t,from)*rel:0))*(1+.15*t.bld.walls*wf):0,needT=t.pass?0:aiNeed(t,f,null,true,.45); // relief counts: it joins the fight. Bolder against the player: losing a city back to them is part of the game
+  const F={aggr:aggrOf(f,t.owner)},dp=t.units.length?(armyPower(t.units)+(rel?reliefPower(t,from)*rel:0))*(1+.15*t.bld.walls*wf):0,needT=t.pass?0:aiNeed(t,f,null,true,.45); // relief counts: it joins the fight. Bolder against the player: losing a city back to them is part of the game
   const send=aiForce(free,Math.max(dp*1.8/F.aggr,needT)),ap=armyPower(send); // enough to win cleanly and to hold the city after
   if(dp>0&&ap<dp*AI_EDGE/F.aggr)return null;
   const left=dp?ap*(.95-.4*(dp/ap)**2):ap; // roughly what survives the fight (see autoResolve)
@@ -4328,6 +4467,25 @@ function aiProjects(s,hd,f,short){ // what the AI would like to build in s, best
     for(const id of ADJ[s.id])if(G.s[id].owner===f&&projOk(s,{k:'road',to:id}))o.push([{k:'road',to:id},(1+(resOf(s).trade?.5:0)+(resOf(G.s[id]).trade?.5:0))*(.5+Math.random())]);}
   return o.sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
 }
+async function aiPyrrhus(f){ // the king seeks battle: his army strikes the best enemy target next to it, or marches on toward the front
+  if(!pyrOn())return;
+  const at=ALLN.map(n=>G.s[n.id]).find(s=>s.owner===f&&s.units.some(u=>u.type==='ep_pyrrhus'&&!u.moved));if(!at)return;
+  const army=at.units.filter(u=>u.pyr&&!u.moved),ap=armyPower(army);let best=null,bs=0;
+  for(const id of moveTargets(at.id)){const t0=G.s[id];
+    if(!pyrFoe(f,t0.owner)||(t0.owner===PLAYER&&G.turn<4)||!pyrNear(id)||(t0.pass&&(!t0.units.length||ambFor(t0,f))))continue;
+    const gate=t0.pass||at.pass?null:gateOn(at.id,id),t=blocksFor(gate,f)&&!ambFor(gate,f)?gate:t0;if(!pyrFoe(f,t.owner))continue;
+    const dp=t.units.length?(armyPower(t.units)+reliefPower(t,at))*(1+.15*t.bld.walls):0;if(dp&&ap<dp*1.3)continue; // bolder than any general of the cities
+    const sc=(ap+1)/(dp+50)+(t0.owner===PLAYER?.4:0)+(t0.owner==='rome'?.3:0)+t0.pop/20000;if(sc>bs){bs=sc;best=t;}}
+  if(best){const camp=best.pass||at.pass?null:gateOn(at.id,best.id),trap=ambFor(camp,f)?camp:null;
+    await cmMarchAI(at.id,trap?trap.id:best.id,f,army);at.units=at.units.filter(u=>!army.includes(u));army.forEach(u=>u.moved=true);
+    await doBattle({attFid:f,units:army,from:at,to:trap||best,ambush:!!trap});return;}
+  const hd={},q=[]; // nothing to strike from here: on to a city of ours nearer an enemy he is willing to fight
+  for(const n of NODES)if(pyrFoe(f,G.s[n.id].owner)&&pyrNear(n.id)){hd[n.id]=0;q.push(n.id);}
+  while(q.length){const c=q.shift();for(const m of ADJ[c])if(hd[m]===undefined){hd[m]=hd[c]+1;q.push(m);}}
+  const here=at.pass?Math.min(...ADJ[at.id].map(id=>hd[id]??9))+.5:hd[at.id]??9;
+  const dest=moveTargets(at.id).map(id=>G.s[id]).filter(t=>!t.pass&&t.owner===f&&t.units.length+army.length<=MAX_UNITS&&(hd[t.id]??9)<here&&!aiBlock(gateOn(at.id,t.id),f))[0];
+  if(!dest)return;await cmMarchAI(at.id,dest.id,f,army);at.units=at.units.filter(u=>!army.includes(u));army.forEach(u=>u.moved=true);dest.units.push(...army);
+}
 const aiGod=(s,hd)=>order(s)<60?'jove':hd[s.id]===1&&Math.random()<.6?'mars':tier(s)<3?'ceres':pick(['merc','ceres','jove']); // order first; Mars on the frontier; else growth, then trade
 async function aiTurn(f){
   const F=FACTIONS[f];let hd=hostileDist(f),started=0;
@@ -4346,14 +4504,18 @@ async function aiTurn(f){
     if(G.cap[f]===s.id&&countGenerals(f)<2&&G.gold[f]>1500&&s.units.length<MAX_UNITS){G.gold[f]-=UNITS.general.cost;s.units.push(trainUnit(s,'general'));}
     while(s.units.length<MAX_UNITS&&(s.units.length<want||gap(s)>0)&&n<(G.cap[f]===s.id||gap(s)>0?2:1)){const t=aiPickUnit(s,f);if(!t)break;const T=UNITS[t];
       const c=unitCost(s,t);if(G.gold[f]-c<150+(gap(s)>0?0:save)||netIncome(f)-T.upk<-20)break;G.gold[f]-=c;s.units.push(trainUnit(s,t));n++;}
+    if(gap(s)>0)aiHire(s,f,gap(s),f==='carthage'?2:1); // still too weak: hire swords
   }
+  if(f==='greeks'){await aiPyrrhus(f);if(G.lost)return;}
   const goal=aiGoal(f);
+  if(f==="carthage"&&goal&&goal.stage&&G.gold[f]>1500+save*.5)aiHire(goal.stage,f,1e9,2); // Carthage buys an army for the war it is planning
   for(const s of shuffle(ownedBy(f))){
     if(s.owner!==f||!s.units.some(u=>!u.moved))continue;let best=null,bs=0,bestSend=null,bestSiege=false;
     for(const id of moveTargets(s.id)){const t0=G.s[id];if(t0.owner===f)continue;if(t0.owner===PLAYER&&G.turn<4)continue;
       if(t0.pass&&(!t0.units.length||ambFor(t0,f)))continue; // armies camp on a pass only when the road makes them
       const gate=t0.pass?null:gateOn(s.id,id),t=blocksFor(gate,f)&&!ambFor(gate,f)?gate:t0; // a hostile pass on the road is fought first (if they know it's there)
       if(t!==t0&&t.owner===PLAYER&&G.turn<4)continue;
+      if(coalPeace(f,t0.owner)||coalPeace(f,t.owner))continue; // allies against the leader leave each other alone
       const pk=gate&&gate.owner===f?campFree(gate):[]; // our own camp on that road falls in with the army as it marches by
       const q=t.pass?null:siegeOf(t.id,f),ours=q&&q.from===s.id,camp=ours?siegeUnits(q,s).filter(u=>!u.moved):[]; // our own siege of t: its army joins the assault
       const free=aiFree(s,f,id).concat(pk,camp);if(!free.length)continue; // what can leave without exposing this city to anyone but the target
@@ -4361,7 +4523,7 @@ async function aiTurn(f){
       if(!k&&!q&&!t.pass&&t.bld.walls&&t.owner!=='rebels'){k=aiStrike(f,aiFree(s,f,id),t,s,0,0);siege=!!k;} // too strong to storm, weak enough to starve (a siege is fought against the garrison alone): dig in
       if(!k)continue;const{send,ap,dp,left,needT}=k;
       const relieve=(G.sieges||[]).some(x=>x.from===t0.id&&G.s[x.to].owner===f); // the army besieging one of ours: drive it off
-      let sc=(ap+1)/(dp+50)+(t0.owner==='rebels'?.4:0)+(t0.owner===PLAYER?.3:0)+(G.cap[t0.owner]===t0.id?.25:0)+t0.pop/20000+(goal&&goal.t===t0?.5:0)+(t0.pass?.1:0)+(relieve?.7:0)+(ours&&q.t>=2?.5:0);
+      let sc=(ap+1)/(dp+50)+(t0.owner==='rebels'?.4:0)+(t0.owner===PLAYER?.3:0)+(G.cap[t0.owner]===t0.id?.25:0)+t0.pop/20000+(goal&&goal.t===t0?.5:0)+(t0.pass?.1:0)+(relieve?.7:0)+(ours&&q.t>=2?.5:0)+(coalFoe(f,t0.owner)?.6:0);
       if(left<needT*.8)sc*=.35;if(siege)sc*=.6;
       if(sc>bs){bs=sc;best=t;bestSend=send;bestSiege=siege;}}
     if(!best)continue;
@@ -4379,8 +4541,8 @@ async function aiTurn(f){
     const ps=G.s[p.id];if(ps.owner!==f||!ps.units.length||G.lost)continue;
     const free=campFree(ps);if(!free.length)continue;
     let best=null,bs=0;const ap=armyPower(free);
-    for(const id of ADJ[p.id]){const e=G.s[id];if(e.owner===f||(e.owner===PLAYER&&G.turn<4))continue;
-      const dp=e.units.length?(armyPower(e.units)+reliefPower(e,ps))*(1+.15*e.bld.walls):0;if(dp>0&&ap<dp*AI_EDGE/F.aggr)continue;
+    for(const id of ADJ[p.id]){const e=G.s[id];if(e.owner===f||(e.owner===PLAYER&&G.turn<4)||coalPeace(f,e.owner))continue;
+      const dp=e.units.length?(armyPower(e.units)+reliefPower(e,ps))*(1+.15*e.bld.walls):0;if(dp>0&&ap<dp*AI_EDGE/aggrOf(f,e.owner))continue;
       const sc=(ap+1)/(dp+50)+(e.owner===PLAYER?.3:0)+e.pop/20000;if(sc>bs){bs=sc;best=e;}}
     if(!best){
       if(ps.bld.walls||aiFront(p,f))continue; // a fort is a post, and a road that faces an enemy is worth holding
@@ -4394,7 +4556,7 @@ async function aiTurn(f){
     for(const pid of shuffle(CPASS[s.id].slice())){
       const ps=G.s[pid],p=PNODE[pid],o=G.s[p.a===s.id?p.b:p.a];
       const trap=ambFor(ps,f); // looks empty to them
-      if(s.owner!==f||G.lost||(ps.units.length&&ps.owner!==f&&!trap)||o.owner===f||o.owner==='rebels')continue; // an enemy camp is for the attack loop
+      if(s.owner!==f||G.lost||(ps.units.length&&ps.owner!==f&&!trap)||o.owner===f||o.owner==='rebels'||coalPeace(f,o.owner))continue; // an enemy camp is for the attack loop
       const foe=rivalPower(o),have=trap?0:armyPower(ps.units)*(1+.15*ps.bld.walls);if(have>=foe*PICKET)continue;
       const free=aiFree(s,f);if(!free.length)break;
       const send=aiForce(free,foe*PICKET-have).slice(0,MAX_UNITS-ps.units.length);
@@ -4427,22 +4589,23 @@ function econTick(f){
     if(s.build){s.build.t--;if(s.build.t<=0){const r=finishProj(s,f);
       nextBuild(s);if(r&&!s.build&&BKEYS.some(b=>s.bld[b]<Math.min(3,tier(s))))r.text+=' Nothing else is queued there.';}}
     s.pop=Math.round(s.pop*(1+growth(s)/100));s.unrest=Math.max(0,s.unrest-5);s.rec=0;
-    if(!besieged(s))for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*.12*heal)); // no food comes in to a besieged city, and the wounded don't recover
+    if(!besieged(s))for(const u of s.units)if(!u.pyr)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*.12*heal)); // no food comes in to a besieged city, and the wounded don't recover
     if(order(s)<20&&s.units.length<2&&G.cap[f]!==s.id&&Math.random()<.35){
-      const back=dropQueue(s);s.owner='rebels';s.units=['rb_mil','rb_mil','rb_sling'].map(t=>mkUnit(t,false));s.unrest=0;s.tax=1;
+      const back=dropQueue(s);s.owner='rebels';s.colony=null;s.units=['rb_mil','rb_mil','rb_sling'].map(t=>mkUnit(t,false));s.unrest=0;s.tax=1;
       if(f===PLAYER)report('🔥',`${sname(s)} revolted and declared itself free!${back?` The ${fmt(back)} gold set aside for its building queue was returned.`:''}`,s.id);}
   }
   for(const s of passStates()){ // armies in the field recover slowly, in a fort a little faster; builders finish; AI forts raise a militia to hold the road
     if(s.owner!==f)continue;
     if(s.units.length){ // work stops while nobody is there to do it
       if(s.build){s.build.t--;if(s.build.t<=0){s.bld.walls=s.build.lv;if(f===PLAYER)report('🏰',`${FORT_NAME[s.build.lv]} completed at ${sname(s)}.`,s.id);s.build=null;}}
-      for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*(s.bld.walls?.1:.06)*heal));}
+      for(const u of s.units)if(!u.pyr)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*(s.bld.walls?.1:.06)*heal));} // Pyrrhus gets no fresh men from Epirus
     if(f!==PLAYER&&s.bld.walls&&s.units.length<2&&G.turn%3===0&&G.gold[f]>500){ // an empty fort is manned again too
       const t=FACTIONS[f].roster.find(t=>{const T=UNITS[t];return(!T.req||T.req.lv===0)&&(T.kind==='inf'||T.kind==='spear');});
       if(t){G.gold[f]-=Math.round(UNITS[t].cost*.5);s.units.push(mkUnit(t,true));}}
   }
-  if(G.gold[f]<0){let worst=null,ws=null;for(const s of [...ownedBy(f),...heldPasses(f)])for(const u of s.units)if(u.type!=='general'&&(!worst||UNITS[u.type].upk>UNITS[worst.type].upk)){worst=u;ws=s;}
-    if(worst){ws.units=ws.units.filter(u=>u!==worst);if(f===PLAYER)report('💰',`Unpaid, the ${UNITS[worst.type].name} in ${sname(ws)} deserted. Keep the treasury above zero.`,ws.id);}}
+  if(G.gold[f]<0){let worst=null,ws=null;const k=u=>unitUpk(u.type,f)+(isMerc(u.type)?1000:0); // hired men are the first to go
+    for(const s of [...ownedBy(f),...heldPasses(f)])for(const u of s.units)if(u.type!=='general'&&!u.pyr&&(!worst||k(u)>k(worst))){worst=u;ws=s;}
+    if(worst){ws.units=ws.units.filter(u=>u!==worst);if(f===PLAYER)report('💰',isMerc(worst.type)?`Unpaid, the ${UNITS[worst.type].name} in ${sname(ws)} walked off to find a better paymaster. Keep the treasury above zero.`:`Unpaid, the ${UNITS[worst.type].name} in ${sname(ws)} deserted. Keep the treasury above zero.`,ws.id);}}
 }
 function rebelTick(){for(const s of ownedBy('rebels')){s.pop=Math.round(s.pop*1.006);
   for(const u of s.units)u.men=Math.min(UNITS[u.type].men,u.men+Math.ceil(UNITS[u.type].men*.1));
@@ -4457,7 +4620,7 @@ function dangerTo(t){ // the strongest rival army next door that could attack t 
     if(s.pass){ // an army camped on the road strikes either end with all but a fort's two best units (the pass-army loop in aiTurn)
       const free=campFree(s);if(!free.length)continue;
       const ap=armyPower(free),dp=t.units.length?(armyPower(t.units)+reliefPower(t,s))*(1+.15*t.bld.walls):0;
-      if(!dp||ap>=dp*AI_EDGE/FACTIONS[f].aggr)add(f,ap,id,free);continue;}
+      if(!dp||ap>=dp*AI_EDGE/aggrOf(f,PLAYER))add(f,ap,id,free);continue;}
     const gate=t.pass?null:gateOn(s.id,t.id);if(blocksFor(gate,f))continue; // a camp on the road meets them first (when it's ours, it gets its own check)
     const q=t.pass?null:siegeOf(t.id,f),ours=q&&q.from===id;
     const free=aiFree(s,f,t.id).concat(gate&&gate.owner===f?campFree(gate):[],ours?siegeUnits(q,s).filter(u=>!u.moved):[]);if(!free.length)continue;
@@ -4504,7 +4667,7 @@ async function endTurn(){
   try{
     econTick(PLAYER);
     for(const f of AI_ORDER){if(!ownedBy(f).length)continue;econTick(f);await sleep(120);await aiTurn(f);repaintTerritory();renderNodes();if(G.lost||!ownedBy(PLAYER).length)break;}
-    rebelTick();siegeTick();G.turn++;
+    rebelTick();siegeTick();mercTick();G.turn++;pyrrhusTick();coalTick();
     for(const n of ALLN)for(const u of G.s[n.id].units){u.moved=false;u.hop=0;}
     if(ownedBy(PLAYER).length)await runOrders(); // armies under march orders take their next stop as the turn begins
   }finally{$('#busy').classList.add('hidden');UI.busy=false;}
@@ -4558,6 +4721,9 @@ const help=()=>`<p>You lead ${G?theF(PLAYER):'one of six powers'} in 280 BC. <b>
 <li><b>Local goods</b>: every city has one — grain for growth, salt for order, wine, oil and purple dye for gold, iron for veteran recruits, horses for cheap cavalry, timber for cheap building. A <b>temple</b> is dedicated to one god when its first shrine goes up, and each god brings a different gift.</li>
 <li><b>Paved roads</b>: a city can pave the road to a neighbouring city of yours. On it an army marches two stops in one turn, and both cities earn trade. A <b>Great City</b> (${fmt(GREAT)} people) can raise one of five <b>wonders</b>, each unique in the world, whose gift reaches all your cities — and passes to whoever takes the city.</li>
 <li><b>Public order</b> drops with high taxes, big cities and recent conquest. Below 20% a lightly held city can revolt.</li>
+<li><b>Every people has its own way</b>${G?` — yours is <b>${PERK[PLAYER].ico} ${PERK[PLAYER].name}</b>: ${PERK[PLAYER].txt}`:'.'} ${Object.keys(PERK).filter(f=>!G||f!==PLAYER).map(f=>`${theF(f,1)}: ${PERK[f].name.toLowerCase()}`).join('; ')}.</li>
+<li><b>Mercenaries</b>: each region of Italy, Sicily and Africa has its own hired swords — Gauls, Samnites, Campanian horse, hoplites, Numidians and more. Hire them in the Recruit tab of any city there: they need no barracks and march at once, but cost more to keep and walk off first if the pay stops. The pool refills slowly.</li>
+<li><b>The balance of power</b>: a people that holds ${COAL_ON} cities scares all the rest into a <b>coalition</b> — they stop fighting each other and turn on the leader until it falls below ${COAL_OFF}. And a few years in, <b>Pyrrhus of Epirus</b> lands in the Greek south with his phalanx and elephants to fight for the Greek cities (the Samnites are his allies), for about ${PYR_STAY} turns. Epirus sends him no fresh men, so every victory costs him.</li>
 <li><b>Armies</b> live in cities. Select units in the Army tab and march one city per turn. Marching into an enemy city starts a battle. Tap a city farther off and the army marches there on its own, one stop at the start of each turn, through your own land — it halts before enemy ground, so the attack is always your call. A march through your own land can be taken back with <b>↶ Undo march</b> until the turn ends.</li>
 <li><b>Passes and forts</b> mark the roads between cities. An army can camp on one, and while it holds it the road is closed: an enemy marching that way must break it first, on an open field (or against a fort's walls). A camped army can build a timber or stone fort. Armies next to a battle march to join it as <b>relief</b>, arriving from the flank a little way into the fight.</li>
 <li><b>Battles</b> are fought in real time on a 3D field — command them yourself or auto-resolve. Tap a unit (or its card) to select it, then tap the ground to march or an enemy to attack. Drag to pan, pinch to zoom, twist or use ⟲ ⟳ to rotate. Pause any time; orders still work while paused.</li>
@@ -4569,7 +4735,10 @@ const help=()=>`<p>You lead ${G?theF(PLAYER):'one of six powers'} in 280 BC. <b>
 <li>The game saves after every turn on this device.</li></ul>`;
 function factionsBody(){
   const rows=Object.keys(FACTIONS).map(f=>{const own=ownedBy(f);return[f,own.length,own.reduce((a,s)=>a+s.units.length,0)];}).filter(r=>r[1]||r[0]===PLAYER);
-  return`<table class="ftab">${rows.map(([f,c,u])=>`<tr><td><span class="sw" style="background:${FACTIONS[f].color}"></span>${FACTIONS[f].name}${f===PLAYER?' <span class="you">(you)</span>':''}</td><td>${c} cit${c===1?'y':'ies'}</td><td>${u} units</td></tr>`).join('')}</table>`;
+  const co=G.coal,P=G.pyr;
+  return`<table class="ftab">${rows.map(([f,c,u])=>`<tr><td><span class="sw" style="background:${FACTIONS[f].color}"></span>${FACTIONS[f].name}${f===PLAYER?' <span class="you">(you)</span>':''}${G.coal&&G.coal.f===f?' 🤝':''}</td><td>${c} cit${c===1?'y':'ies'}</td><td>${u} units</td></tr>`).join('')}</table>`+
+    (co?`<p class="chk-foot">🤝 The other powers stand together against ${co.f===PLAYER?'you':theF(co.f)} until ${co.f===PLAYER?'you hold':theF(co.f)+(FACTIONS[co.f].sg?' holds':' hold')} fewer than ${COAL_OFF} cities.</p>`:'')+
+    (pyrOn()?`<p class="chk-foot">🐘 Pyrrhus of Epirus fights for the Greek cities — for ${Math.max(1,PYR_STAY-(G.turn-P.t))} more turn${PYR_STAY-(G.turn-P.t)>1?'s':''}.</p>`:'');
 }
 async function openMenu(){
   if(UI.busy)return;
@@ -4608,7 +4777,7 @@ async function pickFaction(canBack){ // resolves to a faction id, or null if the
   const go=f=>'Lead '+theF(f);
   const card=f=>{const F=FACTIONS[f],S=PLAYABLE[f],n=SDEF.filter(d=>d[4]===f).length;
     return`<button class="fpick${f===sel?' on':''}" data-f="${f}"><span class="ff" style="background:${F.color}"></span><span class="main">`+
-      `<span class="t">${F.name}<span class="dif ${S.diff.toLowerCase()}">${S.diff}</span></span><span class="d">${S.blurb}</span>`+
+      `<span class="t">${F.name}<span class="dif ${S.diff.toLowerCase()}">${S.diff}</span></span><span class="d">${S.blurb}</span><span class="d"><b>${PERK[f].ico} ${PERK[f].name}:</b> ${PERK[f].txt}</span>`+
       `<span class="ic">${F.roster.map(t=>symSvg(UNITS[t].kind,F.color,22)).join('')}<span>${n} cities · ${NODE[F.capital].name}</span></span></span></button>`;};
   const p=modal({title:'Choose your people',body:Object.keys(PLAYABLE).map(card).join(''),
     buttons:[{label:go(sel),value:'go',cls:'primary'},...(canBack?[{label:'Back',value:null}]:[])]});
@@ -4659,7 +4828,7 @@ document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest
 document.querySelectorAll('.snd').forEach(b=>b.onclick=()=>{const m=AU.cycle();sndUI();toast(['Music and effects on','Effects only','Sound off'][m]);});
 window.addEventListener('pagehide',()=>{if(G&&!B)save();});
 // local dev only: launch a sample battle with testBattle() from the console
-if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))window.imp={get B(){return B;},aiStrike,aiFree,aiNeed,siegeOf,armyPower,reliefPower,lineSlots,orderLine,selUnits,get G(){return G;},routeTo,runOrders,dangerScan,undoMove,openCities,onNode,startMove,render,repaintTerritory,drawMap,PNODES,gateOn,reliefFor,moveTargets,UI,doBattle,executeMove,tidyPasses,aiTurn,endTurn,cam,camT,R3,CM,cv,ct,ATMOS,cmSync,beginBattle,atmo:k=>{atmoSet(k);return R3.atmoK;},size(s){if(SIZES.includes(s))unitSize=s;return unitSize;},adv(s){const sp=B.speed;B.speed=1;for(let i=0;i<s/.05&&B&&R3.scene;i++){cancelAnimationFrame(R3.raf);R3.last=performance.now()-50;frame(performance.now());}if(B)B.speed=sp;}},window.testBattle=(p,e,eFid='gauls',walls=0,atmo,x)=>{ // x: {field, fort, land, pRelief:[types], eRelief:[types], delay, playerIsAttacker}
+if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))window.imp={get B(){return B;},aiStrike,aiFree,aiNeed,siegeOf,armyPower,reliefPower,lineSlots,orderLine,selUnits,get G(){return G;},routeTo,runOrders,dangerScan,undoMove,openCities,onNode,startMove,render,repaintTerritory,drawMap,PNODES,gateOn,reliefFor,moveTargets,UI,doBattle,executeMove,tidyPasses,aiTurn,endTurn,newGame,enterCampaign,hireMerc,mercTick,pyrrhusTick,coalTick,capture,save,ownedBy,netIncome,cam,camT,R3,CM,cv,ct,ATMOS,cmSync,beginBattle,atmo:k=>{atmoSet(k);return R3.atmoK;},size(s){if(SIZES.includes(s))unitSize=s;return unitSize;},adv(s){const sp=B.speed;B.speed=1;for(let i=0;i<s/.05&&B&&R3.scene;i++){cancelAnimationFrame(R3.raf);R3.last=performance.now()-50;frame(performance.now());}if(B)B.speed=sp;}},window.testBattle=(p,e,eFid='gauls',walls=0,atmo,x)=>{ // x: {field, fort, land, pRelief:[types], eRelief:[types], delay, playerIsAttacker}
   let id=9e5;const mk=t=>({uid:id++,type:t,men:UNITS[t].men,xp:0});x=x||{};
   const rl=(a,sd)=>(a||[]).map((t,i)=>({cu:mk(t),delay:(x.delay||20)+i*3,rx:sd*(i%2?1:-1)}));
   p=p||['general','rm_hastati','rm_principes','rm_triarii','rm_velites','rm_equites','rm_legion'];
